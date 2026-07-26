@@ -21,7 +21,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "numpy>=1.26",
+  "numpy>=1.26,<2.3",
   "pandas>=2.2",
   "pydantic>=2.8",
 ]

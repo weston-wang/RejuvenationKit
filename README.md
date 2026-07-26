@@ -87,6 +87,9 @@ See [`examples/minimal_study.py`](examples/minimal_study.py) and
 [`examples/data/longitudinal_observations.csv`](examples/data/longitudinal_observations.csv).
 The [`examples/rapamycin_phase_1_qc.py`](examples/rapamycin_phase_1_qc.py) example demonstrates
 staggered dosing anchors and balanced treatment batches.
+The [`examples/public_gse131754_rapamycin.py`](examples/public_gse131754_rapamycin.py) workflow
+downloads a real public mouse RNA-seq dataset, converts it into typed study data, runs QC, and
+produces explicitly exploratory rapamycin-versus-control expression contrasts.
 
 ## Contribution workflow
 

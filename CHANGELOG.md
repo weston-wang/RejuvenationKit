@@ -13,6 +13,7 @@ Keep a Changelog format.
   visit-level completeness, and out-of-window measurement findings.
 - Subject-relative schedules resolved from timezone-aware enrollment or dosing anchors.
 - Cohort and intervention versus batch association screening using Cramér's V.
+- A tested GSE131754 adapter and end-to-end public rapamycin RNA-seq QC example.
 - Structured report metrics, severity counts, summaries, documentation, and synthetic tests.
 
 ## [0.1.0] - 2026-07-25

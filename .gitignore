@@ -10,6 +10,7 @@ build/
 dist/
 htmlcov/
 site/
+examples/data/cache/
 .DS_Store
 .idea/
 .vscode/
