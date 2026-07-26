@@ -41,9 +41,9 @@ docs = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/OWNER/RejuvenationKit#readme"
-Issues = "https://github.com/OWNER/RejuvenationKit/issues"
-Source = "https://github.com/OWNER/RejuvenationKit"
+Documentation = "https://github.com/weston-wang/RejuvenationKit#readme"
+Issues = "https://github.com/weston-wang/RejuvenationKit/issues"
+Source = "https://github.com/weston-wang/RejuvenationKit"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rejuvenationkit"]
@@ -75,4 +75,3 @@ ignore = ["D203", "D213"]
 python_version = "3.11"
 strict = true
 packages = ["rejuvenationkit"]
-

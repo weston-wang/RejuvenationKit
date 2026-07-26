@@ -1,6 +1,6 @@
 # RejuvenationKit
 
-[![CI](https://github.com/OWNER/RejuvenationKit/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/RejuvenationKit/actions/workflows/ci.yml)
+[![CI](https://github.com/weston-wang/RejuvenationKit/actions/workflows/ci.yml/badge.svg)](https://github.com/weston-wang/RejuvenationKit/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 RejuvenationKit is a planned Python SDK for reproducible, uncertainty-aware analysis of
@@ -103,4 +103,3 @@ curated assay outputs. No therapy recommendations are produced.
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
-
