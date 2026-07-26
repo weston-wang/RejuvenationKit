@@ -8,8 +8,8 @@ longitudinal rejuvenation studies. It will sit above established assay-specific 
 help researchers answer a systems-level question: **what changed, how confidently, and for how
 long?**
 
-> **Status:** pre-alpha scaffold. Interfaces are intentionally small and implementations are
-> marked with TODOs. This project is for research use and is not medical software.
+> **Status:** pre-alpha. Phase 1 longitudinal QC is implemented; later phases retain small
+> placeholder interfaces. This project is for research use and is not medical software.
 
 ## Architecture
 
@@ -39,8 +39,8 @@ return typed result objects rather than unstructured tables.
 
 ## Roadmap
 
-- **Phase 1 — `aging-qc`:** missingness, visit ordering, range checks, batch drift,
-  replicate consistency, and preclinical-study power diagnostics.
+- **Phase 1 — `aging-qc` (baseline implemented):** subject-level missingness, input ordering,
+  range and unit checks, batch mean shifts, and replicate consistency.
 - **Phase 2 — `aging-fusion`:** fuse clocks, omics, pathology, imaging, and clinical
   biomarkers while preserving modality-level uncertainty and disagreement.
 - **Phase 3 — `aging-state`:** longitudinal latent-state estimation, smoothing, change-point
@@ -82,6 +82,7 @@ study = Study(
 ```
 
 See [`examples/minimal_study.py`](examples/minimal_study.py) and
+[`examples/phase_1_qc.py`](examples/phase_1_qc.py), with sample data in
 [`examples/data/longitudinal_observations.csv`](examples/data/longitudinal_observations.csv).
 
 ## Contribution workflow

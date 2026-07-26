@@ -27,9 +27,10 @@ def study() -> Study:
     )
 
 
-def test_phase_one_stub_is_explicit(study: Study) -> None:
-    with pytest.raises(NotImplementedError, match="Phase 1"):
-        BaselineLongitudinalQC().run(study)
+def test_phase_one_returns_report(study: Study) -> None:
+    report = BaselineLongitudinalQC().run(study)
+    assert report.passed
+    assert report.metrics["observations"] == 1
 
 
 def test_phase_two_stubs_are_explicit(study: Study) -> None:

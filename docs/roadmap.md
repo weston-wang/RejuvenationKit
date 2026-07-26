@@ -2,9 +2,12 @@
 
 ## Phase 1: aging-qc
 
-- Define range, missingness, temporal, replicate, and batch checks.
-- Produce machine-readable findings and human-readable summaries.
-- Validate on synthetic longitudinal studies with injected faults.
+- [x] Define range, missingness, temporal, replicate, and batch checks.
+- [x] Produce machine-readable findings and human-readable summaries.
+- [x] Validate on synthetic longitudinal studies with injected faults.
+- [ ] Add expected-visit schedules and visit-level missingness.
+- [ ] Add treatment/batch confounding diagnostics.
+- [ ] Validate thresholds on a public longitudinal aging dataset.
 
 ## Phase 2: aging-fusion
 
@@ -23,4 +26,3 @@
 - Add combination-therapy estimands and efficient-design helpers.
 - Add workflow orchestration, adapters, reports, and benchmark datasets.
 - Stabilize public APIs and publish versioned documentation.
-

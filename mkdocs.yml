@@ -6,8 +6,8 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - Data model: data-model.md
+  - Phase 1 QC: phase-1-qc.md
   - Roadmap: roadmap.md
 plugins:
   - search
   - mkdocstrings
-

@@ -9,7 +9,7 @@ __pycache__/
 build/
 dist/
 htmlcov/
+site/
 .DS_Store
 .idea/
 .vscode/
-
