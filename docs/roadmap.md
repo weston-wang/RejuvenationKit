@@ -6,8 +6,9 @@
 - [x] Produce machine-readable findings and human-readable summaries.
 - [x] Validate on synthetic longitudinal studies with injected faults.
 - [x] Add expected-visit schedules and visit-level missingness.
-- [ ] Add subject-relative schedules anchored to enrollment or intervention time.
-- [ ] Add treatment/batch confounding diagnostics.
+- [x] Add subject-relative schedules anchored to enrollment or intervention time.
+- [x] Add treatment/batch confounding diagnostics.
+- [ ] Add visit/timepoint and study-site confounding diagnostics.
 - [ ] Validate thresholds on a public longitudinal aging dataset.
 
 ## Phase 2: aging-fusion

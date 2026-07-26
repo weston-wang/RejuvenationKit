@@ -11,7 +11,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from rejuvenationkit.schemas import Modality, Observation, Study
+from rejuvenationkit.schemas import Modality, Observation, Study, Subject
 
 
 class Severity(StrEnum):
@@ -62,7 +62,9 @@ class ExpectedVisit(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     visit_id: str = Field(min_length=1)
-    scheduled_at: datetime
+    scheduled_at: datetime | None = None
+    anchor_id: str | None = Field(default=None, min_length=1)
+    offset: timedelta = timedelta(0)
     window_before: timedelta = Field(default=timedelta(0), ge=timedelta(0))
     window_after: timedelta = Field(default=timedelta(0), ge=timedelta(0))
     required_features: tuple[VisitFeature, ...] = Field(min_length=1)
@@ -71,22 +73,55 @@ class ExpectedVisit(BaseModel):
 
     @model_validator(mode="after")
     def validate_visit(self) -> ExpectedVisit:
-        """Reject ambiguous timestamps and duplicate feature requirements."""
-        if self.scheduled_at.tzinfo is None or self.scheduled_at.utcoffset() is None:
+        """Reject ambiguous schedules and duplicate feature requirements."""
+        if (self.scheduled_at is None) == (self.anchor_id is None):
+            raise ValueError("provide exactly one of scheduled_at or anchor_id")
+        if self.scheduled_at is not None and (
+            self.scheduled_at.tzinfo is None or self.scheduled_at.utcoffset() is None
+        ):
             raise ValueError("scheduled_at must be timezone-aware")
         keys = [(item.feature, item.modality) for item in self.required_features]
         if len(keys) != len(set(keys)):
             raise ValueError("visit required_features must be unique")
         return self
 
+    def scheduled_for(self, subject: Subject) -> datetime | None:
+        """Resolve this visit's target time for a subject.
+
+        Returns ``None`` when a relative visit's required anchor is absent.
+        """
+        if self.scheduled_at is not None:
+            return self.scheduled_at
+        if self.anchor_id is None:
+            return None
+        anchor = subject.anchors.get(self.anchor_id)
+        return None if anchor is None else anchor + self.offset
+
+    def window_for(self, subject: Subject) -> tuple[datetime, datetime] | None:
+        """Resolve the inclusive visit window for a subject."""
+        target = self.scheduled_for(subject)
+        if target is None:
+            return None
+        return target - self.window_before, target + self.window_after
+
     @property
     def window_start(self) -> datetime:
-        """Return the inclusive start of the acceptable visit window."""
+        """Return the absolute window start.
+
+        Relative schedules require :meth:`window_for` and a subject.
+        """
+        if self.scheduled_at is None:
+            raise ValueError("relative visits require window_for(subject)")
         return self.scheduled_at - self.window_before
 
     @property
     def window_end(self) -> datetime:
-        """Return the inclusive end of the acceptable visit window."""
+        """Return the absolute window end.
+
+        Relative schedules require :meth:`window_for` and a subject.
+        """
+        if self.scheduled_at is None:
+            raise ValueError("relative visits require window_for(subject)")
         return self.scheduled_at + self.window_after
 
 
@@ -105,6 +140,9 @@ class QCConfig(BaseModel):
     minimum_batch_size: int = Field(default=3, ge=2)
     check_input_order: bool = True
     check_observations_outside_visit_windows: bool = True
+    check_batch_confounding: bool = True
+    batch_confounding_threshold: float = Field(default=0.80, ge=0, le=1)
+    minimum_confounding_group_size: int = Field(default=2, ge=1)
 
     @model_validator(mode="after")
     def validate_missingness_thresholds(self) -> QCConfig:
@@ -194,6 +232,7 @@ class BaselineLongitudinalQC:
             *self._check_temporal_order(study),
             *self._check_replicates(study),
             *self._check_batch_drift(study),
+            *self._check_batch_confounding(study),
         ]
         findings.sort(
             key=lambda item: (
@@ -282,7 +321,7 @@ class BaselineLongitudinalQC:
 
         for visit in self.config.expected_visits:
             eligible_subjects = tuple(
-                subject.subject_id
+                subject
                 for subject in study.subjects
                 if _visit_applies(visit, subject.subject_id, subject.cohort)
             )
@@ -297,11 +336,33 @@ class BaselineLongitudinalQC:
                 )
                 continue
 
+            targets: dict[str, datetime] = {}
+            for subject in eligible_subjects:
+                target = _visit_target(visit, subject)
+                if target is None:
+                    findings.append(
+                        QCFinding(
+                            code="visit_anchor_missing",
+                            severity=Severity.ERROR,
+                            message=(
+                                f"Subject {subject.subject_id!r} lacks anchor "
+                                f"{visit.anchor_id!r} for visit {visit.visit_id!r}"
+                            ),
+                            subject_ids=(subject.subject_id,),
+                            context={
+                                "visit_id": visit.visit_id,
+                                "anchor_id": visit.anchor_id or "",
+                            },
+                        )
+                    )
+                else:
+                    targets[subject.subject_id] = target
             matched: dict[str, set[tuple[str, Modality | None]]] = {
-                subject_id: set() for subject_id in eligible_subjects
+                subject_id: set() for subject_id in targets
             }
             for row in study.observations:
-                if row.subject_id not in matched or not _inside_visit_window(row, visit):
+                target = targets.get(row.subject_id)
+                if target is None or not _inside_visit_window(row, visit, target):
                     continue
                 for requirement in visit.required_features:
                     if _matches_visit_feature(row, requirement) and math.isfinite(row.value):
@@ -315,7 +376,7 @@ class BaselineLongitudinalQC:
                     code="expected_visit_missing",
                     visit=visit,
                     subject_ids=fully_missing,
-                    eligible_subject_count=len(eligible_subjects),
+                    eligible_subject_count=len(matched),
                     message=(
                         f"Visit {visit.visit_id!r} has no required measurements for "
                         f"{len(fully_missing)}/{len(eligible_subjects)} subjects"
@@ -337,7 +398,7 @@ class BaselineLongitudinalQC:
                     code="visit_feature_missing",
                     visit=visit,
                     subject_ids=partially_missing,
-                    eligible_subject_count=len(eligible_subjects),
+                    eligible_subject_count=len(matched),
                     message=(
                         f"{requirement.feature} is missing at visit {visit.visit_id!r} for "
                         f"{len(partially_missing)}/{len(eligible_subjects)} subjects"
@@ -375,7 +436,7 @@ class BaselineLongitudinalQC:
             "visit_id": visit.visit_id,
             "missing_fraction": fraction,
             "missing_subjects": len(subject_ids),
-            "scheduled_at": visit.scheduled_at.isoformat(),
+            "schedule": _visit_schedule_description(visit),
         }
         if feature is not None:
             context["feature"] = feature
@@ -396,17 +457,19 @@ class BaselineLongitudinalQC:
     ) -> list[QCFinding]:
         findings: list[QCFinding] = []
         for index, row in enumerate(study.observations):
+            subject = next(item for item in study.subjects if item.subject_id == row.subject_id)
             relevant_visits = [
-                visit
+                (visit, target)
                 for visit in self.config.expected_visits
                 if _visit_applies(visit, row.subject_id, subject_cohorts[row.subject_id])
                 and any(
                     _matches_visit_feature(row, requirement)
                     for requirement in visit.required_features
                 )
+                and (target := _visit_target(visit, subject)) is not None
             ]
             if not relevant_visits or any(
-                _inside_visit_window(row, visit) for visit in relevant_visits
+                _inside_visit_window(row, visit, target) for visit, target in relevant_visits
             ):
                 continue
             findings.append(
@@ -422,10 +485,81 @@ class BaselineLongitudinalQC:
                     context={
                         "feature": row.feature,
                         "timestamp": row.timestamp.isoformat(),
-                        "candidate_visits": ",".join(visit.visit_id for visit in relevant_visits),
+                        "candidate_visits": ",".join(
+                            visit.visit_id for visit, _ in relevant_visits
+                        ),
                     },
                 )
             )
+        return findings
+
+    def _check_batch_confounding(self, study: Study) -> list[QCFinding]:
+        if not self.config.check_batch_confounding:
+            return []
+        subject_lookup = {subject.subject_id: subject for subject in study.subjects}
+        strata: defaultdict[tuple[Modality, str], set[tuple[str, str]]] = defaultdict(set)
+        for row in study.observations:
+            if row.batch_id is not None:
+                strata[(row.modality, row.feature)].add((row.subject_id, row.batch_id))
+
+        interventions = sorted(
+            {name for subject in study.subjects for name in subject.interventions}
+        )
+        findings: list[QCFinding] = []
+        for (modality, feature), assignments in strata.items():
+            factors: list[tuple[str, dict[str, str]]] = [
+                (
+                    "cohort",
+                    {
+                        subject_id: subject_lookup[subject_id].cohort
+                        for subject_id, _ in assignments
+                    },
+                )
+            ]
+            factors.extend(
+                (
+                    f"intervention:{intervention}",
+                    {
+                        subject_id: (
+                            "exposed"
+                            if intervention in subject_lookup[subject_id].interventions
+                            else "unexposed"
+                        )
+                        for subject_id, _ in assignments
+                    },
+                )
+                for intervention in interventions
+            )
+            for factor, labels in factors:
+                group_sizes = Counter(labels.values())
+                batches = {batch_id for _, batch_id in assignments}
+                if (
+                    len(group_sizes) < 2
+                    or len(batches) < 2
+                    or min(group_sizes.values()) < self.config.minimum_confounding_group_size
+                ):
+                    continue
+                association = _cramers_v(assignments, labels)
+                if association < self.config.batch_confounding_threshold:
+                    continue
+                findings.append(
+                    QCFinding(
+                        code="batch_assignment_confounding",
+                        severity=Severity.ERROR,
+                        message=(
+                            f"{factor} is strongly associated with batch for "
+                            f"{modality.value}/{feature} (Cramér's V={association:.2f})"
+                        ),
+                        subject_ids=tuple(sorted(labels)),
+                        context={
+                            "factor": factor,
+                            "feature": feature,
+                            "modality": modality.value,
+                            "association": association,
+                            "batches": len(batches),
+                        },
+                    )
+                )
         return findings
 
     def _check_missingness(self, study: Study) -> list[QCFinding]:
@@ -590,11 +724,46 @@ def _visit_applies(visit: ExpectedVisit, subject_id: str, cohort: str) -> bool:
     return subject_id in visit.subject_ids or cohort in visit.cohorts
 
 
-def _inside_visit_window(row: Observation, visit: ExpectedVisit) -> bool:
-    return visit.window_start <= row.timestamp <= visit.window_end
+def _visit_target(visit: ExpectedVisit, subject: Subject) -> datetime | None:
+    return visit.scheduled_for(subject)
+
+
+def _inside_visit_window(row: Observation, visit: ExpectedVisit, target: datetime) -> bool:
+    return target - visit.window_before <= row.timestamp <= target + visit.window_after
 
 
 def _matches_visit_feature(row: Observation, requirement: VisitFeature) -> bool:
     return row.feature == requirement.feature and (
         requirement.modality is None or row.modality is requirement.modality
     )
+
+
+def _visit_schedule_description(visit: ExpectedVisit) -> str:
+    if visit.scheduled_at is not None:
+        return visit.scheduled_at.isoformat()
+    return f"{visit.anchor_id}{visit.offset.total_seconds():+g}s"
+
+
+def _cramers_v(assignments: set[tuple[str, str]], labels: dict[str, str]) -> float:
+    groups = sorted(set(labels.values()))
+    batches = sorted({batch_id for _, batch_id in assignments})
+    counts = {
+        (group, batch): sum(
+            1
+            for subject_id, batch_id in assignments
+            if labels[subject_id] == group and batch_id == batch
+        )
+        for group in groups
+        for batch in batches
+    }
+    total = sum(counts.values())
+    row_totals = {group: sum(counts[group, batch] for batch in batches) for group in groups}
+    column_totals = {batch: sum(counts[group, batch] for group in groups) for batch in batches}
+    chi_square = 0.0
+    for group in groups:
+        for batch in batches:
+            expected = row_totals[group] * column_totals[batch] / total
+            if expected > 0:
+                chi_square += (counts[group, batch] - expected) ** 2 / expected
+    denominator = total * min(len(groups) - 1, len(batches) - 1)
+    return math.sqrt(chi_square / denominator) if denominator > 0 else 0.0

@@ -14,4 +14,5 @@ should remain assay-neutral; modality adapters can be added separately.
 
 Expected visits are QC policies rather than stored observations. This keeps recorded facts in
 `Study` separate from protocol expectations in `QCConfig` and allows the same study to be checked
-against revised or alternative schedules.
+against revised or alternative schedules. Named event anchors remain subject facts and allow one
+relative policy, such as “28 days after first dose,” to resolve to different calendar dates.

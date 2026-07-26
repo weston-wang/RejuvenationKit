@@ -45,3 +45,19 @@ def test_observation_requires_timezone() -> None:
             value=30.0,
             unit="g",
         )
+
+
+def test_subject_anchors_require_timezone() -> None:
+    subject = Subject(
+        subject_id="s1",
+        cohort="treated",
+        anchors={"first_dose": datetime(2026, 1, 1, tzinfo=UTC)},
+    )
+    assert subject.anchors["first_dose"].tzinfo is UTC
+
+    with pytest.raises(ValidationError, match="anchors must be timezone-aware"):
+        Subject(
+            subject_id="s1",
+            cohort="treated",
+            anchors={"first_dose": datetime(2026, 1, 1)},
+        )

@@ -207,7 +207,10 @@ def visit(
 
 
 def test_complete_expected_visit_within_inclusive_window_passes() -> None:
-    config = QCConfig(expected_visits=(visit(),))
+    expected = visit()
+    assert expected.window_start == START + timedelta(days=6)
+    assert expected.window_end == START + timedelta(days=8)
+    config = QCConfig(expected_visits=(expected,))
     study = make_study(row("s1", 30, day=6), row("s2", 31, day=8))
     report = BaselineLongitudinalQC(config).run(study)
     assert report.findings == ()
@@ -311,3 +314,104 @@ def test_invalid_expected_visit_configuration_is_rejected() -> None:
     duplicate = visit()
     with pytest.raises(ValidationError, match="unique visit_id"):
         QCConfig(expected_visits=(duplicate, duplicate))
+
+
+def test_relative_visit_resolves_each_subject_anchor() -> None:
+    expected = ExpectedVisit(
+        visit_id="four-weeks-after-dose",
+        anchor_id="first_dose",
+        offset=timedelta(days=28),
+        window_before=timedelta(days=2),
+        window_after=timedelta(days=2),
+        required_features=(VisitFeature(feature="body_mass"),),
+    )
+    study = Study(
+        study_id="staggered-dosing",
+        subjects=(
+            Subject(
+                subject_id="s1",
+                cohort="treated",
+                anchors={"first_dose": START},
+            ),
+            Subject(
+                subject_id="s2",
+                cohort="treated",
+                anchors={"first_dose": START + timedelta(days=10)},
+            ),
+        ),
+        observations=(row("s1", 30, day=28), row("s2", 31, day=38)),
+    )
+    assert expected.window_for(study.subjects[1]) == (
+        START + timedelta(days=36),
+        START + timedelta(days=40),
+    )
+    with pytest.raises(ValueError, match="window_for"):
+        _ = expected.window_start
+    report = BaselineLongitudinalQC(QCConfig(expected_visits=(expected,))).run(study)
+    assert report.findings == ()
+
+
+def test_relative_visit_reports_missing_subject_anchor() -> None:
+    expected = ExpectedVisit(
+        visit_id="after-dose",
+        anchor_id="first_dose",
+        offset=timedelta(days=7),
+        required_features=(VisitFeature(feature="body_mass"),),
+    )
+    report = BaselineLongitudinalQC(QCConfig(expected_visits=(expected,))).run(
+        make_study(row("s1", 30, day=7), subjects=("s1",))
+    )
+    assert codes(report) == {"visit_anchor_missing"}
+    assert report.findings[0].context["anchor_id"] == "first_dose"
+
+
+def test_expected_visit_requires_exactly_one_schedule_mode() -> None:
+    required = (VisitFeature(feature="body_mass"),)
+    with pytest.raises(ValidationError, match="exactly one"):
+        ExpectedVisit(visit_id="none", required_features=required)
+    with pytest.raises(ValidationError, match="exactly one"):
+        ExpectedVisit(
+            visit_id="both",
+            scheduled_at=START,
+            anchor_id="first_dose",
+            required_features=required,
+        )
+
+
+def confounding_study(*, balanced: bool) -> Study:
+    subjects = (
+        Subject(subject_id="r1", cohort="all", interventions=("rapamycin",)),
+        Subject(subject_id="r2", cohort="all", interventions=("rapamycin",)),
+        Subject(subject_id="c1", cohort="all"),
+        Subject(subject_id="c2", cohort="all"),
+    )
+    batches = (
+        {"r1": "a", "r2": "b", "c1": "a", "c2": "b"}
+        if balanced
+        else {"r1": "a", "r2": "a", "c1": "b", "c2": "b"}
+    )
+    observations = tuple(
+        row(subject.subject_id, 30, batch_id=batches[subject.subject_id]) for subject in subjects
+    )
+    return Study(study_id="rapamycin", subjects=subjects, observations=observations)
+
+
+def test_batch_assignment_confounding_detects_intervention_segregation() -> None:
+    report = BaselineLongitudinalQC().run(confounding_study(balanced=False))
+    assert codes(report) == {"batch_assignment_confounding"}
+    finding = report.findings[0]
+    assert finding.severity is Severity.ERROR
+    assert finding.context["factor"] == "intervention:rapamycin"
+    assert finding.context["association"] == pytest.approx(1)
+
+
+def test_balanced_treatment_batches_do_not_trigger_confounding() -> None:
+    report = BaselineLongitudinalQC().run(confounding_study(balanced=True))
+    assert report.findings == ()
+
+
+def test_batch_confounding_check_can_be_disabled() -> None:
+    report = BaselineLongitudinalQC(QCConfig(check_batch_confounding=False)).run(
+        confounding_study(balanced=False)
+    )
+    assert report.findings == ()

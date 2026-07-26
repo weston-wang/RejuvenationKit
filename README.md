@@ -40,8 +40,8 @@ return typed result objects rather than unstructured tables.
 ## Roadmap
 
 - **Phase 1 — `aging-qc` (baseline implemented):** subject- and visit-level missingness,
-  expected-visit windows, input ordering, range and unit checks, batch mean shifts, and replicate
-  consistency.
+  absolute and subject-relative visit windows, input ordering, range and unit checks, batch mean
+  shifts, treatment/batch confounding, and replicate consistency.
 - **Phase 2 — `aging-fusion`:** fuse clocks, omics, pathology, imaging, and clinical
   biomarkers while preserving modality-level uncertainty and disagreement.
 - **Phase 3 — `aging-state`:** longitudinal latent-state estimation, smoothing, change-point
@@ -85,6 +85,8 @@ study = Study(
 See [`examples/minimal_study.py`](examples/minimal_study.py) and
 [`examples/phase_1_qc.py`](examples/phase_1_qc.py), with sample data in
 [`examples/data/longitudinal_observations.csv`](examples/data/longitudinal_observations.csv).
+The [`examples/rapamycin_phase_1_qc.py`](examples/rapamycin_phase_1_qc.py) example demonstrates
+staggered dosing anchors and balanced treatment batches.
 
 ## Contribution workflow
 

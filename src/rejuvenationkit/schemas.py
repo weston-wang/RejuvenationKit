@@ -28,7 +28,20 @@ class Subject(BaseModel):
     subject_id: str = Field(min_length=1)
     cohort: str = Field(min_length=1)
     interventions: tuple[str, ...] = ()
+    anchors: dict[str, datetime] = Field(default_factory=dict)
     attributes: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def require_timezone_aware_anchors(self) -> Subject:
+        """Reject ambiguous subject event anchors."""
+        ambiguous = [
+            name
+            for name, timestamp in self.anchors.items()
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None
+        ]
+        if ambiguous:
+            raise ValueError(f"subject anchors must be timezone-aware: {sorted(ambiguous)}")
+        return self
 
 
 class Observation(BaseModel):
