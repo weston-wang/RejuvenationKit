@@ -1,0 +1,26 @@
+name: Scientific feature
+description: Propose an estimator, check, schema, or validation case
+title: "[Proposal]: "
+labels: ["enhancement", "needs-validation"]
+body:
+  - type: textarea
+    id: decision
+    attributes:
+      label: Research decision
+      description: What decision should this feature support?
+    validations:
+      required: true
+  - type: textarea
+    id: estimand
+    attributes:
+      label: Estimand and assumptions
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Proposed validation
+      description: Identify synthetic truth or public data and acceptance criteria.
+    validations:
+      required: true
+

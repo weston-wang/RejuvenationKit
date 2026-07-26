@@ -1,0 +1,6 @@
+study_id,subject_id,cohort,interventions,timestamp,modality,feature,value,unit,standard_error,batch_id,replicate_id
+demo-study,mouse-001,control,,2026-01-01T00:00:00Z,clinical,body_mass,30.1,g,0.2,batch-01,r1
+demo-study,mouse-001,control,,2026-02-01T00:00:00Z,clinical,body_mass,30.4,g,0.2,batch-02,r1
+demo-study,mouse-002,treated,therapy-a,2026-01-01T00:00:00Z,clinical,body_mass,31.2,g,0.2,batch-01,r1
+demo-study,mouse-002,treated,therapy-a,2026-02-01T00:00:00Z,clinical,body_mass,30.8,g,0.2,batch-02,r1
+

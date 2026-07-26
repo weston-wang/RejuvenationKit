@@ -1,0 +1,13 @@
+site_name: RejuvenationKit
+site_description: Uncertainty-aware analysis for longitudinal rejuvenation studies
+theme:
+  name: material
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Data model: data-model.md
+  - Roadmap: roadmap.md
+plugins:
+  - search
+  - mkdocstrings
+
