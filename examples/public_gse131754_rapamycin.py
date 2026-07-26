@@ -7,11 +7,20 @@ estimate lifespan extension or prove biological rejuvenation.
 from __future__ import annotations
 
 import argparse
+from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
 
-from rejuvenationkit import BaselineLongitudinalQC, FeatureRule, Modality, QCConfig
+from rejuvenationkit import (
+    BaselineLongitudinalQC,
+    ExpectedVisit,
+    FeatureRule,
+    Modality,
+    QCConfig,
+    StudyProfiler,
+    VisitFeature,
+)
 from rejuvenationkit.datasets.gse131754 import (
     GSE131754_URL,
     build_study,
@@ -57,6 +66,10 @@ def main() -> None:
     variable_genes = tuple(str(item) for item in counts.var(axis=1).nlargest(args.genes).index)
     study = build_study(counts, gene_ids=variable_genes)
 
+    requirements = tuple(
+        VisitFeature(feature=gene_id, modality=Modality.TRANSCRIPTOMICS)
+        for gene_id in variable_genes
+    )
     config = QCConfig(
         feature_rules=tuple(
             FeatureRule(
@@ -67,16 +80,50 @@ def main() -> None:
                 required=True,
             )
             for gene_id in variable_genes
-        )
+        ),
+        expected_visits=tuple(
+            ExpectedVisit(
+                visit_id=f"age-{age_months}m",
+                anchor_id="normalized_birth",
+                offset=timedelta(days=age_months * 365.2425 / 12),
+                required_features=requirements,
+                cohorts=(f"rap_{age_months}m", f"con_{age_months}m"),
+            )
+            for age_months in (6, 12)
+        ),
     )
     report = BaselineLongitudinalQC(config).run(study)
+    profile = StudyProfiler(config).profile(study)
     effects = descriptive_log2_fold_changes(counts)
     manifest = analysis_manifest(study.subjects)
+    coverage = profile.coverage_frame()
 
     print(f"Source: {GSE131754_URL}")
     print(f"Selected matrix: {counts.shape[0]:,} genes x {counts.shape[1]} samples")
     print(f"Typed QC subset: {len(variable_genes)} genes x {len(study.subjects)} subjects")
     print(report.summary())
+    print("\nCross-sectional sample completeness by reported age:")
+    age_coverage = (
+        coverage.loc[coverage["cohort"] == "all"]
+        .groupby("visit_id")
+        .agg(
+            required_features=("feature", "count"),
+            minimum_feature_coverage=("coverage_fraction", "min"),
+            maximum_feature_coverage=("coverage_fraction", "max"),
+        )
+    )
+    print(
+        age_coverage.to_string(
+            formatters={
+                "minimum_feature_coverage": lambda value: f"{value:.1%}",
+                "maximum_feature_coverage": lambda value: f"{value:.1%}",
+            }
+        )
+    )
+    print(
+        "Longitudinal readiness: not applicable—different mice were sampled at each age, "
+        "so the dataset must not be treated as paired observations."
+    )
     print(
         "Batch note: the processed GEO matrix does not expose sequencing-batch identifiers, "
         "so batch-confounding QC cannot be evaluated from this file."
@@ -91,6 +138,7 @@ def main() -> None:
     if args.output_dir is not None:
         args.output_dir.mkdir(parents=True, exist_ok=True)
         manifest.to_csv(args.output_dir / "sample_manifest.csv", index=False)
+        coverage.to_csv(args.output_dir / "visit_feature_coverage.csv", index=False)
         effects.to_csv(args.output_dir / "descriptive_expression_differences.csv")
         (args.output_dir / "qc_report.json").write_text(
             report.model_dump_json(indent=2),

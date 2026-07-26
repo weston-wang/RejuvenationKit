@@ -1,5 +1,12 @@
 """Uncertainty-aware analysis primitives for longitudinal rejuvenation studies."""
 
+from rejuvenationkit.profiling import (
+    PairedReadiness,
+    StudyProfile,
+    StudyProfiler,
+    VisitCoverage,
+    VisitRetention,
+)
 from rejuvenationkit.qc import (
     BaselineLongitudinalQC,
     ExpectedVisit,
@@ -17,11 +24,16 @@ __all__ = [
     "FeatureRule",
     "Modality",
     "Observation",
+    "PairedReadiness",
     "QCConfig",
     "QCFinding",
     "QCReport",
     "Study",
+    "StudyProfile",
+    "StudyProfiler",
     "Subject",
+    "VisitCoverage",
     "VisitFeature",
+    "VisitRetention",
 ]
 __version__ = "0.1.0"

@@ -3,6 +3,10 @@
 `BaselineLongitudinalQC` is the dependency-light reference pipeline. It accepts a validated
 `Study` and an immutable `QCConfig`, then returns a `QCReport` without changing the study.
 
+`StudyProfiler` uses that same configuration to quantify analysis readiness rather than only
+flagging failures. It reports feature coverage at each visit, complete-case retention between
+consecutive visits, and the number of subjects available for paired feature analyses.
+
 ## Implemented checks
 
 | Check | Finding code | Default severity |
@@ -35,6 +39,7 @@ from rejuvenationkit import (
     ExpectedVisit,
     FeatureRule,
     QCConfig,
+    StudyProfiler,
     VisitFeature,
 )
 
@@ -67,11 +72,35 @@ config = QCConfig(
 
 report = BaselineLongitudinalQC(config).run(study)
 print(report.summary())
+
+profile = StudyProfiler(config).profile(study)
+print(profile.coverage_frame())
+print(profile.retention_frame())
+print(profile.paired_readiness_frame())
 ```
 
 Every finding includes a stable code, severity, message, affected subject identifiers,
 observation indices, and check-specific context. Downstream workflows should branch on codes,
 not human-readable messages.
+
+## Analysis-readiness profiling
+
+The profile contains three typed tables:
+
+| Table | Question answered |
+|---|---|
+| `visit_coverage` | How many eligible subjects have each required feature at each visit? |
+| `visit_retention` | How many complete cases remain complete at the next scheduled visit? |
+| `paired_readiness` | How many subjects can support a paired comparison for each shared feature? |
+
+Every table includes an `all` cohort summary and separate rows for each actual cohort. Coverage
+uses finite measurements inside the configured inclusive visit window. Complete-case retention
+requires every feature specified for both visits; paired readiness is feature-specific and is
+therefore often less restrictive.
+
+Profiles quantify usable data but do not test treatment effects. In a cross-sectional study where
+different subjects are collected at each age, visit coverage remains useful while paired
+longitudinal readiness is not scientifically applicable.
 
 ## Expected-visit semantics
 
@@ -143,3 +172,5 @@ effect cannot be cleanly separated from batch for that feature. Disable the diag
 - Confounding screening currently covers cohort and binary exposure to each named intervention.
   Visit/timepoint and site confounding remain future extensions.
 - A passing report establishes only that configured checks found no errors.
+- Retention is calculated only between consecutive visits in configuration order.
+- A zero denominator produces a fraction of zero rather than an undefined or infinite value.

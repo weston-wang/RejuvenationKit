@@ -13,8 +13,9 @@ python examples/public_dog_aging_project.py \
 
 It downloads and caches the source archive, validates dog and visit identifiers,
 creates typed longitudinal subjects and observations, checks expected-visit
-missingness, and summarizes paired chemistry changes among dogs measured at both
-waves.
+missingness, reports visit-by-feature coverage, quantifies complete-case retention
+and paired-analysis readiness, and summarizes paired chemistry changes among dogs
+measured at both waves.
 
 ## Normalized visit timing
 

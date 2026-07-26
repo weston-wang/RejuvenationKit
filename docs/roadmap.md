@@ -8,7 +8,9 @@
 - [x] Add expected-visit schedules and visit-level missingness.
 - [x] Add subject-relative schedules anchored to enrollment or intervention time.
 - [x] Add treatment/batch confounding diagnostics.
+- [x] Add visit coverage, complete-case retention, and paired-analysis readiness profiles.
 - [ ] Add visit/timepoint and study-site confounding diagnostics.
+- [ ] Add distribution, robust-outlier, and attrition-bias diagnostics.
 - [ ] Validate thresholds on a public longitudinal aging dataset.
 
 ## Phase 2: aging-fusion

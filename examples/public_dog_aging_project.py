@@ -16,6 +16,7 @@ from rejuvenationkit import (
     FeatureRule,
     Modality,
     QCConfig,
+    StudyProfiler,
     VisitFeature,
 )
 from rejuvenationkit.datasets.dog_aging_project import (
@@ -79,11 +80,43 @@ def main() -> None:
         ),
     )
     report = BaselineLongitudinalQC(config).run(study)
+    profile = StudyProfiler(config).profile(study)
     changes = paired_changes(selected, features=FEATURES)
+    coverage = profile.coverage_frame()
+    retention = profile.retention_frame()
+    readiness = profile.paired_readiness_frame()
 
     print(f"Source: {DAP_ARCHIVE_URL}")
     print(f"Canine records: {len(selected):,} visit rows from {len(study.subjects):,} dogs")
     print(report.summary())
+    print("\nVisit-by-feature coverage (all dogs):")
+    print(
+        coverage.loc[coverage["cohort"] == "all"]
+        .pivot(index="feature", columns="visit_id", values="coverage_fraction")
+        .to_string(float_format=lambda value: f"{value:.1%}")
+    )
+    print("\nComplete-case retention:")
+    print(
+        retention.loc[retention["cohort"] == "all"].to_string(
+            index=False,
+            columns=[
+                "from_visit_id",
+                "to_visit_id",
+                "from_complete_subjects",
+                "retained_subjects",
+                "retention_fraction",
+            ],
+            formatters={"retention_fraction": lambda value: f"{value:.1%}"},
+        )
+    )
+    print("\nPaired-analysis readiness (all dogs):")
+    print(
+        readiness.loc[readiness["cohort"] == "all"].to_string(
+            index=False,
+            columns=["feature", "eligible_subjects", "paired_subjects", "paired_fraction"],
+            formatters={"paired_fraction": lambda value: f"{value:.1%}"},
+        )
+    )
     print("\nDescriptive precision_2 minus precision_1 changes:")
     print(changes.to_string())
     print(
@@ -94,6 +127,9 @@ def main() -> None:
 
     if args.output_dir is not None:
         args.output_dir.mkdir(parents=True, exist_ok=True)
+        coverage.to_csv(args.output_dir / "visit_feature_coverage.csv", index=False)
+        retention.to_csv(args.output_dir / "visit_retention.csv", index=False)
+        readiness.to_csv(args.output_dir / "paired_analysis_readiness.csv", index=False)
         changes.to_csv(args.output_dir / "paired_chemistry_changes.csv")
         (args.output_dir / "qc_report.json").write_text(
             report.model_dump_json(indent=2),

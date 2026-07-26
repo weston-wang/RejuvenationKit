@@ -41,7 +41,8 @@ return typed result objects rather than unstructured tables.
 
 - **Phase 1 — `aging-qc` (baseline implemented):** subject- and visit-level missingness,
   absolute and subject-relative visit windows, input ordering, range and unit checks, batch mean
-  shifts, treatment/batch confounding, and replicate consistency.
+  shifts, treatment/batch confounding, replicate consistency, visit coverage, longitudinal
+  retention, and paired-analysis readiness.
 - **Phase 2 — `aging-fusion`:** fuse clocks, omics, pathology, imaging, and clinical
   biomarkers while preserving modality-level uncertainty and disagreement.
 - **Phase 3 — `aging-state`:** longitudinal latent-state estimation, smoothing, change-point
