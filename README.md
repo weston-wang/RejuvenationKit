@@ -90,6 +90,10 @@ staggered dosing anchors and balanced treatment batches.
 The [`examples/public_gse131754_rapamycin.py`](examples/public_gse131754_rapamycin.py) workflow
 downloads a real public mouse RNA-seq dataset, converts it into typed study data, runs QC, and
 produces explicitly exploratory rapamycin-versus-control expression contrasts.
+The [`examples/public_dog_aging_project.py`](examples/public_dog_aging_project.py) workflow
+downloads real longitudinal blood chemistry measurements from pet dogs, checks expected-visit
+missingness, and summarizes paired changes. It has no treatment assignment and is not a
+rapamycin-effectiveness analysis.
 
 ## Contribution workflow
 
