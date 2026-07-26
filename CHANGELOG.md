@@ -9,6 +9,8 @@ Keep a Changelog format.
 
 - Configurable Phase 1 QC for values, units, required-feature missingness, temporal ordering,
   technical-replicate disagreement, and batch mean shifts.
+- Absolute expected-visit schedules with inclusive tolerance windows, subject/cohort selectors,
+  visit-level completeness, and out-of-window measurement findings.
 - Structured report metrics, severity counts, summaries, documentation, and synthetic tests.
 
 ## [0.1.0] - 2026-07-25

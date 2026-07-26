@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from statistics import fmean, variance
 from typing import Protocol
@@ -42,12 +42,61 @@ class FeatureRule(BaseModel):
         return self
 
 
+class VisitFeature(BaseModel):
+    """A feature expected within a scheduled visit window."""
+
+    model_config = ConfigDict(frozen=True)
+
+    feature: str = Field(min_length=1)
+    modality: Modality | None = None
+
+
+class ExpectedVisit(BaseModel):
+    """An expected visit and its required measurements.
+
+    Empty ``subject_ids`` and ``cohorts`` selectors mean the visit applies to all
+    study subjects. When either selector is populated, a subject matching either
+    selector is included.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    visit_id: str = Field(min_length=1)
+    scheduled_at: datetime
+    window_before: timedelta = Field(default=timedelta(0), ge=timedelta(0))
+    window_after: timedelta = Field(default=timedelta(0), ge=timedelta(0))
+    required_features: tuple[VisitFeature, ...] = Field(min_length=1)
+    subject_ids: tuple[str, ...] = ()
+    cohorts: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_visit(self) -> ExpectedVisit:
+        """Reject ambiguous timestamps and duplicate feature requirements."""
+        if self.scheduled_at.tzinfo is None or self.scheduled_at.utcoffset() is None:
+            raise ValueError("scheduled_at must be timezone-aware")
+        keys = [(item.feature, item.modality) for item in self.required_features]
+        if len(keys) != len(set(keys)):
+            raise ValueError("visit required_features must be unique")
+        return self
+
+    @property
+    def window_start(self) -> datetime:
+        """Return the inclusive start of the acceptable visit window."""
+        return self.scheduled_at - self.window_before
+
+    @property
+    def window_end(self) -> datetime:
+        """Return the inclusive end of the acceptable visit window."""
+        return self.scheduled_at + self.window_after
+
+
 class QCConfig(BaseModel):
     """Configuration for the baseline longitudinal QC pipeline."""
 
     model_config = ConfigDict(frozen=True)
 
     feature_rules: tuple[FeatureRule, ...] = ()
+    expected_visits: tuple[ExpectedVisit, ...] = ()
     missingness_warning_fraction: float = Field(default=0.10, ge=0, le=1)
     missingness_error_fraction: float = Field(default=0.25, ge=0, le=1)
     replicate_relative_tolerance: float = Field(default=0.20, ge=0)
@@ -55,6 +104,7 @@ class QCConfig(BaseModel):
     batch_z_threshold: float = Field(default=3.0, gt=0)
     minimum_batch_size: int = Field(default=3, ge=2)
     check_input_order: bool = True
+    check_observations_outside_visit_windows: bool = True
 
     @model_validator(mode="after")
     def validate_missingness_thresholds(self) -> QCConfig:
@@ -64,6 +114,9 @@ class QCConfig(BaseModel):
         keys = [(rule.feature, rule.modality) for rule in self.feature_rules]
         if len(keys) != len(set(keys)):
             raise ValueError("feature rules must have unique feature/modality pairs")
+        visit_ids = [visit.visit_id for visit in self.expected_visits]
+        if len(visit_ids) != len(set(visit_ids)):
+            raise ValueError("expected visits must have unique visit_id values")
         return self
 
 
@@ -137,6 +190,7 @@ class BaselineLongitudinalQC:
         findings = [
             *self._check_values_and_ranges(study),
             *self._check_missingness(study),
+            *self._check_expected_visits(study),
             *self._check_temporal_order(study),
             *self._check_replicates(study),
             *self._check_batch_drift(study),
@@ -156,6 +210,7 @@ class BaselineLongitudinalQC:
             "batches": len(
                 {row.batch_id for row in study.observations if row.batch_id is not None}
             ),
+            "expected_visits": len(self.config.expected_visits),
         }
         return QCReport(study_id=study.study_id, findings=tuple(findings), metrics=metrics)
 
@@ -219,6 +274,158 @@ class BaselineLongitudinalQC:
                         context=context,
                     )
                 )
+        return findings
+
+    def _check_expected_visits(self, study: Study) -> list[QCFinding]:
+        findings: list[QCFinding] = []
+        subject_cohorts = {subject.subject_id: subject.cohort for subject in study.subjects}
+
+        for visit in self.config.expected_visits:
+            eligible_subjects = tuple(
+                subject.subject_id
+                for subject in study.subjects
+                if _visit_applies(visit, subject.subject_id, subject.cohort)
+            )
+            if not eligible_subjects:
+                findings.append(
+                    QCFinding(
+                        code="expected_visit_has_no_subjects",
+                        severity=Severity.WARNING,
+                        message=f"Expected visit {visit.visit_id!r} applies to no study subjects",
+                        context={"visit_id": visit.visit_id},
+                    )
+                )
+                continue
+
+            matched: dict[str, set[tuple[str, Modality | None]]] = {
+                subject_id: set() for subject_id in eligible_subjects
+            }
+            for row in study.observations:
+                if row.subject_id not in matched or not _inside_visit_window(row, visit):
+                    continue
+                for requirement in visit.required_features:
+                    if _matches_visit_feature(row, requirement) and math.isfinite(row.value):
+                        matched[row.subject_id].add((requirement.feature, requirement.modality))
+
+            fully_missing = tuple(
+                subject_id for subject_id, observed in matched.items() if not observed
+            )
+            if fully_missing:
+                finding = self._visit_missing_finding(
+                    code="expected_visit_missing",
+                    visit=visit,
+                    subject_ids=fully_missing,
+                    eligible_subject_count=len(eligible_subjects),
+                    message=(
+                        f"Visit {visit.visit_id!r} has no required measurements for "
+                        f"{len(fully_missing)}/{len(eligible_subjects)} subjects"
+                    ),
+                )
+                if finding is not None:
+                    findings.append(finding)
+
+            for requirement in visit.required_features:
+                key = (requirement.feature, requirement.modality)
+                partially_missing = tuple(
+                    subject_id
+                    for subject_id, observed in matched.items()
+                    if observed and key not in observed
+                )
+                if not partially_missing:
+                    continue
+                finding = self._visit_missing_finding(
+                    code="visit_feature_missing",
+                    visit=visit,
+                    subject_ids=partially_missing,
+                    eligible_subject_count=len(eligible_subjects),
+                    message=(
+                        f"{requirement.feature} is missing at visit {visit.visit_id!r} for "
+                        f"{len(partially_missing)}/{len(eligible_subjects)} subjects"
+                    ),
+                    feature=requirement.feature,
+                    modality=requirement.modality,
+                )
+                if finding is not None:
+                    findings.append(finding)
+
+        if self.config.check_observations_outside_visit_windows:
+            findings.extend(self._check_observations_outside_visit_windows(study, subject_cohorts))
+        return findings
+
+    def _visit_missing_finding(
+        self,
+        *,
+        code: str,
+        visit: ExpectedVisit,
+        subject_ids: tuple[str, ...],
+        eligible_subject_count: int,
+        message: str,
+        feature: str | None = None,
+        modality: Modality | None = None,
+    ) -> QCFinding | None:
+        fraction = len(subject_ids) / eligible_subject_count
+        if fraction < self.config.missingness_warning_fraction:
+            return None
+        severity = (
+            Severity.ERROR
+            if fraction >= self.config.missingness_error_fraction
+            else Severity.WARNING
+        )
+        context: dict[str, str | int | float | bool] = {
+            "visit_id": visit.visit_id,
+            "missing_fraction": fraction,
+            "missing_subjects": len(subject_ids),
+            "scheduled_at": visit.scheduled_at.isoformat(),
+        }
+        if feature is not None:
+            context["feature"] = feature
+        if modality is not None:
+            context["modality"] = modality.value
+        return QCFinding(
+            code=code,
+            severity=severity,
+            message=message,
+            subject_ids=subject_ids,
+            context=context,
+        )
+
+    def _check_observations_outside_visit_windows(
+        self,
+        study: Study,
+        subject_cohorts: dict[str, str],
+    ) -> list[QCFinding]:
+        findings: list[QCFinding] = []
+        for index, row in enumerate(study.observations):
+            relevant_visits = [
+                visit
+                for visit in self.config.expected_visits
+                if _visit_applies(visit, row.subject_id, subject_cohorts[row.subject_id])
+                and any(
+                    _matches_visit_feature(row, requirement)
+                    for requirement in visit.required_features
+                )
+            ]
+            if not relevant_visits or any(
+                _inside_visit_window(row, visit) for visit in relevant_visits
+            ):
+                continue
+            findings.append(
+                QCFinding(
+                    code="observation_outside_visit_window",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"{row.feature} at {row.timestamp.isoformat()} is outside all "
+                        "applicable expected-visit windows"
+                    ),
+                    subject_ids=(row.subject_id,),
+                    observation_indices=(index,),
+                    context={
+                        "feature": row.feature,
+                        "timestamp": row.timestamp.isoformat(),
+                        "candidate_visits": ",".join(visit.visit_id for visit in relevant_visits),
+                    },
+                )
+            )
         return findings
 
     def _check_missingness(self, study: Study) -> list[QCFinding]:
@@ -375,3 +582,19 @@ class BaselineLongitudinalQC:
 
 def _severity_rank(severity: Severity) -> int:
     return {Severity.ERROR: 0, Severity.WARNING: 1, Severity.INFO: 2}[severity]
+
+
+def _visit_applies(visit: ExpectedVisit, subject_id: str, cohort: str) -> bool:
+    if not visit.subject_ids and not visit.cohorts:
+        return True
+    return subject_id in visit.subject_ids or cohort in visit.cohorts
+
+
+def _inside_visit_window(row: Observation, visit: ExpectedVisit) -> bool:
+    return visit.window_start <= row.timestamp <= visit.window_end
+
+
+def _matches_visit_feature(row: Observation, requirement: VisitFeature) -> bool:
+    return row.feature == requirement.feature and (
+        requirement.modality is None or row.modality is requirement.modality
+    )

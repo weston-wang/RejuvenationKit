@@ -5,9 +5,11 @@ from pydantic import ValidationError
 
 from rejuvenationkit.qc import (
     BaselineLongitudinalQC,
+    ExpectedVisit,
     FeatureRule,
     QCConfig,
     Severity,
+    VisitFeature,
 )
 from rejuvenationkit.schemas import Modality, Observation, Study, Subject
 
@@ -71,7 +73,13 @@ def test_clean_study_passes_and_summarizes() -> None:
         Severity.ERROR: 0,
     }
     assert report.summary() == "qc-study: PASS (0 errors, 0 warnings, 0 info)"
-    assert report.metrics == {"subjects": 2, "observations": 2, "features": 1, "batches": 0}
+    assert report.metrics == {
+        "subjects": 2,
+        "observations": 2,
+        "features": 1,
+        "batches": 0,
+        "expected_visits": 0,
+    }
 
 
 def test_range_unit_and_nonfinite_checks() -> None:
@@ -178,3 +186,128 @@ def test_invalid_configuration_is_rejected() -> None:
                 FeatureRule(feature="body_mass"),
             )
         )
+
+
+def visit(
+    *,
+    day: int = 7,
+    required_features: tuple[VisitFeature, ...] = (VisitFeature(feature="body_mass"),),
+    subject_ids: tuple[str, ...] = (),
+    cohorts: tuple[str, ...] = (),
+) -> ExpectedVisit:
+    return ExpectedVisit(
+        visit_id="week-1",
+        scheduled_at=START + timedelta(days=day),
+        window_before=timedelta(days=1),
+        window_after=timedelta(days=1),
+        required_features=required_features,
+        subject_ids=subject_ids,
+        cohorts=cohorts,
+    )
+
+
+def test_complete_expected_visit_within_inclusive_window_passes() -> None:
+    config = QCConfig(expected_visits=(visit(),))
+    study = make_study(row("s1", 30, day=6), row("s2", 31, day=8))
+    report = BaselineLongitudinalQC(config).run(study)
+    assert report.findings == ()
+    assert report.metrics["expected_visits"] == 1
+
+
+def test_fully_missing_visit_reports_eligible_subjects() -> None:
+    config = QCConfig(
+        expected_visits=(visit(),),
+        check_observations_outside_visit_windows=False,
+    )
+    report = BaselineLongitudinalQC(config).run(make_study(subjects=("s1", "s2")))
+    assert codes(report) == {"expected_visit_missing"}
+    finding = report.findings[0]
+    assert finding.severity is Severity.ERROR
+    assert finding.subject_ids == ("s1", "s2")
+    assert finding.context["visit_id"] == "week-1"
+    assert finding.context["missing_fraction"] == 1
+
+
+def test_partial_visit_reports_only_missing_feature() -> None:
+    expected = visit(
+        required_features=(
+            VisitFeature(feature="body_mass"),
+            VisitFeature(feature="heart_rate", modality=Modality.CLINICAL),
+        )
+    )
+    config = QCConfig(expected_visits=(expected,))
+    study = make_study(
+        row("s1", 30, day=7),
+        row("s2", 31, day=7),
+        row("s2", 450, day=7, feature="heart_rate", unit="bpm"),
+    )
+    report = BaselineLongitudinalQC(config).run(study)
+    assert codes(report) == {"visit_feature_missing"}
+    finding = report.findings[0]
+    assert finding.subject_ids == ("s1",)
+    assert finding.context["feature"] == "heart_rate"
+    assert finding.context["modality"] == "clinical"
+
+
+def test_observation_outside_window_is_separate_from_missing_visit() -> None:
+    config = QCConfig(expected_visits=(visit(),))
+    report = BaselineLongitudinalQC(config).run(make_study(row("s1", 30, day=10), subjects=("s1",)))
+    assert codes(report) == {"expected_visit_missing", "observation_outside_visit_window"}
+    outside = next(
+        finding for finding in report.findings if finding.code == "observation_outside_visit_window"
+    )
+    assert outside.observation_indices == (0,)
+    assert outside.context["candidate_visits"] == "week-1"
+
+
+def test_visit_subject_and_cohort_selectors_use_union() -> None:
+    expected = visit(subject_ids=("s1",), cohorts=("special",))
+    study = Study(
+        study_id="selected",
+        subjects=(
+            Subject(subject_id="s1", cohort="ordinary"),
+            Subject(subject_id="s2", cohort="special"),
+            Subject(subject_id="s3", cohort="ordinary"),
+        ),
+        observations=(row("s1", 30, day=7), row("s2", 31, day=7)),
+    )
+    report = BaselineLongitudinalQC(QCConfig(expected_visits=(expected,))).run(study)
+    assert report.findings == ()
+
+
+def test_visit_with_no_matching_subjects_is_reported() -> None:
+    expected = visit(cohorts=("not-present",))
+    report = BaselineLongitudinalQC(QCConfig(expected_visits=(expected,))).run(
+        make_study(row("s1", 30, day=7), subjects=("s1",))
+    )
+    assert codes(report) == {"expected_visit_has_no_subjects"}
+
+
+def test_invalid_expected_visit_configuration_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        ExpectedVisit(
+            visit_id="bad-time",
+            scheduled_at=datetime(2026, 1, 1),
+            required_features=(VisitFeature(feature="body_mass"),),
+        )
+    with pytest.raises(ValidationError, match="at least 1"):
+        ExpectedVisit(visit_id="empty", scheduled_at=START, required_features=())
+    with pytest.raises(ValidationError, match="greater than or equal"):
+        ExpectedVisit(
+            visit_id="negative-window",
+            scheduled_at=START,
+            window_before=timedelta(days=-1),
+            required_features=(VisitFeature(feature="body_mass"),),
+        )
+    with pytest.raises(ValidationError, match="required_features must be unique"):
+        ExpectedVisit(
+            visit_id="duplicates",
+            scheduled_at=START,
+            required_features=(
+                VisitFeature(feature="body_mass"),
+                VisitFeature(feature="body_mass"),
+            ),
+        )
+    duplicate = visit()
+    with pytest.raises(ValidationError, match="unique visit_id"):
+        QCConfig(expected_visits=(duplicate, duplicate))

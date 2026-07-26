@@ -5,7 +5,8 @@
 - [x] Define range, missingness, temporal, replicate, and batch checks.
 - [x] Produce machine-readable findings and human-readable summaries.
 - [x] Validate on synthetic longitudinal studies with injected faults.
-- [ ] Add expected-visit schedules and visit-level missingness.
+- [x] Add expected-visit schedules and visit-level missingness.
+- [ ] Add subject-relative schedules anchored to enrollment or intervention time.
 - [ ] Add treatment/batch confounding diagnostics.
 - [ ] Validate thresholds on a public longitudinal aging dataset.
 
