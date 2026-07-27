@@ -97,6 +97,7 @@ def main() -> None:
     effects = descriptive_log2_fold_changes(counts)
     manifest = analysis_manifest(study.subjects)
     coverage = profile.coverage_frame()
+    distributions = profile.distributions_frame()
 
     print(f"Source: {GSE131754_URL}")
     print(f"Selected matrix: {counts.shape[0]:,} genes x {counts.shape[1]} samples")
@@ -124,6 +125,17 @@ def main() -> None:
         "Longitudinal readiness: not applicable—different mice were sampled at each age, "
         "so the dataset must not be treated as paired observations."
     )
+    print("\nRobust expression outlier summary:")
+    outlier_summary = (
+        distributions.loc[distributions["cohort"] == "all"]
+        .groupby("visit_id")
+        .agg(
+            profiled_features=("feature", "count"),
+            features_with_outliers=("outlier_count", lambda values: int((values > 0).sum())),
+            outlier_observations=("outlier_count", "sum"),
+        )
+    )
+    print(outlier_summary.to_string())
     print(
         "Batch note: the processed GEO matrix does not expose sequencing-batch identifiers, "
         "so batch-confounding QC cannot be evaluated from this file."
@@ -139,6 +151,7 @@ def main() -> None:
         args.output_dir.mkdir(parents=True, exist_ok=True)
         manifest.to_csv(args.output_dir / "sample_manifest.csv", index=False)
         coverage.to_csv(args.output_dir / "visit_feature_coverage.csv", index=False)
+        distributions.to_csv(args.output_dir / "feature_distributions.csv", index=False)
         effects.to_csv(args.output_dir / "descriptive_expression_differences.csv")
         (args.output_dir / "qc_report.json").write_text(
             report.model_dump_json(indent=2),

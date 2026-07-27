@@ -9,6 +9,7 @@ import pytest
 
 from rejuvenationkit.datasets.dog_aging_project import (
     DAP_CHEMISTRY_MEMBER,
+    build_multimodal_study,
     build_study,
     paired_changes,
     parse_visit_number,
@@ -65,3 +66,35 @@ def test_read_chemistry_rejects_duplicate_dog_visits(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="must be unique"):
         read_chemistry(path)
+
+
+def test_build_multimodal_study_preserves_modalities() -> None:
+    chemistry = pd.DataFrame(
+        {
+            "dog_id": [1, 1],
+            "Sample_Year": ["precision_1", "precision_2"],
+            "globulin": [2.8, 3.0],
+        }
+    )
+    metabolomics = pd.DataFrame(
+        {
+            "dog_id": ["1", "1"],
+            "Sample_Year": ["precision_1", "precision_2"],
+            "ethanolamine": [0.1, 0.3],
+        }
+    )
+
+    study = build_multimodal_study(
+        chemistry,
+        metabolomics,
+        clinical_features=("globulin",),
+        metabolomic_features=("ethanolamine",),
+        source_uri="fixture",
+    )
+
+    assert len(study.subjects) == 1
+    assert {row.modality.value for row in study.observations} == {
+        "clinical",
+        "metabolomics",
+    }
+    assert study.metadata["modalities"] == "clinical,metabolomics"

@@ -14,6 +14,7 @@ class Modality(StrEnum):
     CLINICAL = "clinical"
     HISTOLOGY = "histology"
     IMAGING = "imaging"
+    METABOLOMICS = "metabolomics"
     METHYLATION = "methylation"
     PROTEOMICS = "proteomics"
     TRANSCRIPTOMICS = "transcriptomics"

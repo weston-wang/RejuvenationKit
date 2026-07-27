@@ -39,6 +39,9 @@ docs = [
   "mkdocs-material>=9.6",
   "mkdocstrings[python]>=0.29",
 ]
+public-data = [
+  "pyreadr>=0.5",
+]
 
 [project.urls]
 Documentation = "https://github.com/weston-wang/RejuvenationKit#readme"

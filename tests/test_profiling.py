@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from rejuvenationkit.profiling import StudyProfiler
 from rejuvenationkit.qc import ExpectedVisit, QCConfig, VisitFeature
 from rejuvenationkit.schemas import Modality, Observation, Study, Subject
@@ -88,3 +90,73 @@ def test_profile_handles_missing_relative_anchor_and_empty_tables() -> None:
     assert not profile.coverage_frame().empty
     assert profile.retention_frame().empty
     assert profile.paired_readiness_frame().empty
+    assert profile.distributions_frame().iloc[0]["subjects"] == 0
+    assert profile.attrition_bias_frame().empty
+
+
+def test_profile_summarizes_distributions_and_robust_outliers() -> None:
+    subjects = tuple(Subject(subject_id=f"s{index}", cohort="test") for index in range(1, 5))
+    study = Study(
+        study_id="outliers",
+        subjects=subjects,
+        observations=tuple(
+            _observation(subject.subject_id, 0, "albumin").model_copy(update={"value": value})
+            for subject, value in zip(subjects, (1.0, 1.0, 1.0, 10.0), strict=True)
+        ),
+    )
+    config = QCConfig(
+        expected_visits=(
+            ExpectedVisit(
+                visit_id="baseline",
+                scheduled_at=START,
+                required_features=(VisitFeature(feature="albumin", modality=Modality.CLINICAL),),
+            ),
+        )
+    )
+
+    profile = StudyProfiler(config).profile(study)
+    distribution = next(row for row in profile.feature_distributions if row.cohort == "all")
+
+    assert distribution.subjects == 4
+    assert distribution.median == 1
+    assert distribution.outlier_subject_ids == ("s4",)
+    frame = profile.distributions_frame()
+    assert frame.loc[frame["cohort"] == "all", "outlier_count"].iloc[0] == 1
+
+
+def test_profile_quantifies_baseline_attrition_bias() -> None:
+    subjects = tuple(Subject(subject_id=f"s{index}", cohort="test") for index in range(1, 5))
+    baseline = tuple(
+        _observation(subject.subject_id, 0, "albumin").model_copy(update={"value": value})
+        for subject, value in zip(subjects, (1.0, 2.0, 9.0, 10.0), strict=True)
+    )
+    follow_up = (
+        _observation("s1", 30, "albumin"),
+        _observation("s2", 30, "albumin"),
+    )
+    study = Study(study_id="attrition", subjects=subjects, observations=(*baseline, *follow_up))
+    requirement = (VisitFeature(feature="albumin", modality=Modality.CLINICAL),)
+    config = QCConfig(
+        expected_visits=(
+            ExpectedVisit(visit_id="baseline", scheduled_at=START, required_features=requirement),
+            ExpectedVisit(
+                visit_id="follow-up",
+                scheduled_at=START + timedelta(days=30),
+                required_features=requirement,
+            ),
+        )
+    )
+
+    profile = StudyProfiler(config).profile(study)
+    bias = next(row for row in profile.attrition_bias if row.cohort == "all")
+
+    assert bias.retained_subjects == 2
+    assert bias.attrited_subjects == 2
+    assert bias.retained_baseline_mean == 1.5
+    assert bias.attrited_baseline_mean == 9.5
+    assert bias.standardized_mean_difference == pytest.approx(-11.313708)
+
+
+def test_profiler_rejects_negative_outlier_multiplier() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        StudyProfiler(QCConfig(), outlier_iqr_multiplier=-1)

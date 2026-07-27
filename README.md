@@ -42,7 +42,8 @@ return typed result objects rather than unstructured tables.
 - **Phase 1 — `aging-qc` (baseline implemented):** subject- and visit-level missingness,
   absolute and subject-relative visit windows, input ordering, range and unit checks, batch mean
   shifts, treatment/batch confounding, replicate consistency, visit coverage, longitudinal
-  retention, and paired-analysis readiness.
+  retention, paired-analysis readiness, robust outliers, attrition-bias diagnostics, and
+  covariance-aware multivariate change detection.
 - **Phase 2 — `aging-fusion`:** fuse clocks, omics, pathology, imaging, and clinical
   biomarkers while preserving modality-level uncertainty and disagreement.
 - **Phase 3 — `aging-state`:** longitudinal latent-state estimation, smoothing, change-point
@@ -95,6 +96,9 @@ The [`examples/public_dog_aging_project.py`](examples/public_dog_aging_project.p
 downloads real longitudinal blood chemistry measurements from pet dogs, checks expected-visit
 missingness, and summarizes paired changes. It has no treatment assignment and is not a
 rapamycin-effectiveness analysis.
+The [`examples/public_dog_multimodal.py`](examples/public_dog_multimodal.py) workflow combines
+aligned clinical chemistry and metabolomics, then applies held-out covariance-aware change
+detection across both modalities. Install `.[public-data]` to read the source R-data object.
 
 ## Contribution workflow
 

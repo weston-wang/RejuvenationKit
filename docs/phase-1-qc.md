@@ -6,6 +6,8 @@
 `StudyProfiler` uses that same configuration to quantify analysis readiness rather than only
 flagging failures. It reports feature coverage at each visit, complete-case retention between
 consecutive visits, and the number of subjects available for paired feature analyses.
+It also summarizes visit-level distributions, identifies robust Tukey-IQR outliers, and compares
+baseline values between retained and missing-follow-up subjects.
 
 ## Implemented checks
 
@@ -77,6 +79,8 @@ profile = StudyProfiler(config).profile(study)
 print(profile.coverage_frame())
 print(profile.retention_frame())
 print(profile.paired_readiness_frame())
+print(profile.distributions_frame())
+print(profile.attrition_bias_frame())
 ```
 
 Every finding includes a stable code, severity, message, affected subject identifiers,
@@ -92,11 +96,24 @@ The profile contains three typed tables:
 | `visit_coverage` | How many eligible subjects have each required feature at each visit? |
 | `visit_retention` | How many complete cases remain complete at the next scheduled visit? |
 | `paired_readiness` | How many subjects can support a paired comparison for each shared feature? |
+| `feature_distributions` | What are the visit-level quantiles, spread, and robust outliers? |
+| `attrition_bias` | Do retained and missing-follow-up subjects differ at baseline? |
 
 Every table includes an `all` cohort summary and separate rows for each actual cohort. Coverage
 uses finite measurements inside the configured inclusive visit window. Complete-case retention
 requires every feature specified for both visits; paired readiness is feature-specific and is
 therefore often less restrictive.
+
+Distribution rows aggregate repeated matching observations within a subject before calculating
+the mean, sample standard deviation, quartiles, extrema, and Tukey fences. Values below
+`Q1 - 1.5 × IQR` or above `Q3 + 1.5 × IQR` are reported by subject identifier. The multiplier is
+configurable on `StudyProfiler`; outliers are diagnostic flags, not automatic exclusions.
+
+Attrition diagnostics are feature-specific. For every consecutive pair of visits, subjects with a
+finite baseline value are divided according to whether that feature is present at follow-up. The
+profile reports both baseline means and their standardized mean difference (retained minus
+attrited, divided by pooled within-group standard deviation). It returns no standardized estimate
+when either group has fewer than two observations or pooled variance is zero.
 
 Profiles quantify usable data but do not test treatment effects. In a cross-sectional study where
 different subjects are collected at each age, visit coverage remains useful while paired
@@ -174,3 +191,5 @@ effect cannot be cleanly separated from batch for that feature. Disable the diag
 - A passing report establishes only that configured checks found no errors.
 - Retention is calculated only between consecutive visits in configuration order.
 - A zero denominator produces a fraction of zero rather than an undefined or infinite value.
+- Attrition standardized differences are descriptive screening metrics, not hypothesis tests or
+  evidence that missingness is causal.

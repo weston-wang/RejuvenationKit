@@ -10,8 +10,11 @@
 - [x] Add treatment/batch confounding diagnostics.
 - [x] Add visit coverage, complete-case retention, and paired-analysis readiness profiles.
 - [ ] Add visit/timepoint and study-site confounding diagnostics.
-- [ ] Add distribution, robust-outlier, and attrition-bias diagnostics.
+- [x] Add distribution, robust-outlier, and attrition-bias diagnostics.
+- [x] Add covariance-aware multivariate change detection with empirical false-alarm calibration.
+- [x] Validate one detector across aligned longitudinal clinical and metabolomic channels.
 - [ ] Validate thresholds on a public longitudinal aging dataset.
+- [ ] Add sequential detection across three or more visits with persistence requirements.
 
 ## Phase 2: aging-fusion
 

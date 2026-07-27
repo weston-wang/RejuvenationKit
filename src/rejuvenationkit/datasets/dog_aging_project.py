@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from pathlib import Path
-from typing import Final, cast
+from typing import Final, Protocol, cast
 from urllib.request import urlopen
 from zipfile import ZipFile
 
@@ -18,8 +20,14 @@ DAP_ARCHIVE_URL: Final = "https://dataverse.harvard.edu/api/access/datafile/1398
 DAP_CHEMISTRY_MEMBER: Final = (
     "baseline_phenotype_datasets/DAP_2024_SamplesResults_ChemistryPanel_analyzed.csv"
 )
+DAP_METABOLOMICS_MEMBER: Final = "baseline_phenotype_datasets/Precision_techAdjustedData"
 _NORMALIZED_FIRST_VISIT = datetime(2000, 1, 1, tzinfo=UTC)
 _VISIT_PATTERN = "precision_"
+
+
+class _PyreadrModule(Protocol):
+    def read_r(self, path: str) -> dict[str, pd.DataFrame]:
+        """Read R data objects from a local file."""
 
 
 def download_archive(destination: Path, *, overwrite: bool = False) -> Path:
@@ -59,6 +67,38 @@ def read_chemistry(path: Path) -> pd.DataFrame:
     for visit in chemistry["Sample_Year"].astype(str):
         parse_visit_number(visit)
     return chemistry
+
+
+def read_metabolomics(path: Path) -> pd.DataFrame:
+    """Read the technical-adjusted longitudinal metabolomics table.
+
+    Install the ``public-data`` project extra to provide the optional R-data
+    reader used by this adapter.
+    """
+    try:
+        reader = cast(_PyreadrModule, import_module("pyreadr"))
+    except ModuleNotFoundError as error:
+        raise ImportError(
+            'reading Dog Aging Project metabolomics requires "rejuvenationkit[public-data]"'
+        ) from error
+    with ZipFile(path) as archive:
+        if DAP_METABOLOMICS_MEMBER not in archive.namelist():
+            raise ValueError(f"archive does not contain {DAP_METABOLOMICS_MEMBER!r}")
+        payload = archive.read(DAP_METABOLOMICS_MEMBER)
+    with tempfile.TemporaryDirectory() as directory:
+        extracted = Path(directory) / "Precision_techAdjustedData"
+        extracted.write_bytes(payload)
+        objects = reader.read_r(str(extracted))
+    if "Pdat" not in objects:
+        raise ValueError("metabolomics R data does not contain 'Pdat'")
+    metabolomics = objects["Pdat"].copy()
+    required = {"dog_id", "Sample_Year"}
+    missing = required.difference(metabolomics.columns)
+    if missing:
+        raise ValueError(f"metabolomics table is missing columns: {sorted(missing)}")
+    if metabolomics.duplicated(["dog_id", "Sample_Year"]).any():
+        raise ValueError("metabolomics dog_id and Sample_Year pairs must be unique")
+    return metabolomics
 
 
 def parse_visit_number(visit: str) -> int:
@@ -112,8 +152,98 @@ def build_study(
         )
         for dog_id in dog_ids
     )
+    observations = _table_observations(
+        chemistry,
+        features=features,
+        modality=Modality.CLINICAL,
+        unit="reported_value",
+        source_uri=source_uri,
+    )
+    return Study(
+        study_id="dog-aging-project-longitudinal-chemistry",
+        subjects=subjects,
+        observations=tuple(observations),
+        metadata={
+            "dataset_doi": DAP_DATASET_DOI,
+            "organism": "Canis lupus familiaris",
+            "design": "observational longitudinal cohort",
+            "timeline": "normalized visit waves; not calendar collection dates",
+        },
+    )
+
+
+def build_multimodal_study(
+    chemistry: pd.DataFrame,
+    metabolomics: pd.DataFrame,
+    *,
+    clinical_features: tuple[str, ...],
+    metabolomic_features: tuple[str, ...],
+    source_uri: str = DAP_DATASET_DOI,
+) -> Study:
+    """Combine aligned clinical chemistry and metabolomics visit waves."""
+    missing_clinical = set(clinical_features).difference(chemistry.columns)
+    missing_metabolomic = set(metabolomic_features).difference(metabolomics.columns)
+    if missing_clinical or missing_metabolomic:
+        raise ValueError(
+            "requested multimodal features are absent: "
+            f"clinical={sorted(missing_clinical)}, "
+            f"metabolomics={sorted(missing_metabolomic)}"
+        )
+    dog_ids = tuple(
+        sorted(
+            {str(value) for value in chemistry["dog_id"]}
+            | {str(value) for value in metabolomics["dog_id"]}
+        )
+    )
+    subjects = tuple(
+        Subject(
+            subject_id=dog_id,
+            cohort="dog_aging_project_precision",
+            anchors={"normalized_precision_1": _NORMALIZED_FIRST_VISIT},
+            attributes={"species": "Canis lupus familiaris", "source": "Dog Aging Project"},
+        )
+        for dog_id in dog_ids
+    )
+    observations = [
+        *_table_observations(
+            chemistry,
+            features=clinical_features,
+            modality=Modality.CLINICAL,
+            unit="reported_value",
+            source_uri=source_uri,
+        ),
+        *_table_observations(
+            metabolomics,
+            features=metabolomic_features,
+            modality=Modality.METABOLOMICS,
+            unit="technical_adjusted_abundance",
+            source_uri=source_uri,
+        ),
+    ]
+    return Study(
+        study_id="dog-aging-project-multimodal-longitudinal",
+        subjects=subjects,
+        observations=tuple(observations),
+        metadata={
+            "dataset_doi": DAP_DATASET_DOI,
+            "organism": "Canis lupus familiaris",
+            "modalities": "clinical,metabolomics",
+            "design": "observational longitudinal cohort",
+            "timeline": "normalized visit waves; not calendar collection dates",
+        },
+    )
+
+
+def _table_observations(
+    table: pd.DataFrame,
+    *,
+    features: tuple[str, ...],
+    modality: Modality,
+    unit: str,
+    source_uri: str,
+) -> list[Observation]:
     observations: list[Observation] = []
-    for _, row in chemistry.iterrows():
+    for _, row in table.iterrows():
         dog_id = str(row["dog_id"])
         visit = str(row["Sample_Year"])
         visit_number = parse_visit_number(visit)
@@ -126,25 +256,15 @@ def build_study(
                 Observation(
                     subject_id=dog_id,
                     timestamp=timestamp,
-                    modality=Modality.CLINICAL,
+                    modality=modality,
                     feature=feature,
                     value=float(cast(float, value)),
-                    unit="reported_value",
+                    unit=unit,
                     replicate_id=visit,
                     source_uri=source_uri,
                 )
             )
-    return Study(
-        study_id="dog-aging-project-longitudinal-chemistry",
-        subjects=subjects,
-        observations=tuple(observations),
-        metadata={
-            "dataset_doi": DAP_DATASET_DOI,
-            "organism": "Canis lupus familiaris",
-            "design": "observational longitudinal cohort",
-            "timeline": "normalized visit waves; not calendar collection dates",
-        },
-    )
+    return observations
 
 
 def paired_changes(

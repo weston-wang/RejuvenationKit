@@ -21,9 +21,10 @@ The script:
 4. creates typed `Subject`, `Observation`, and `Study` objects;
 5. runs Phase 1 QC over the most variable genes;
 6. profiles feature completeness within each reported-age sampling group;
-7. explicitly identifies that different mice—not repeated measurements—represent each age;
-8. computes descriptive RAP-minus-control log2 CPM differences within each age/sex stratum; and
-9. optionally writes a sample manifest, coverage table, QC report, and descriptive results.
+7. summarizes visit-level expression distributions and robust sample outliers;
+8. explicitly identifies that different mice—not repeated measurements—represent each age;
+9. computes descriptive RAP-minus-control log2 CPM differences within each age/sex stratum; and
+10. optionally writes a sample manifest, profiling tables, QC report, and descriptive results.
 
 Network access is required only for the first run. The downloaded file is cached under
 `examples/data/cache/`, which is excluded from version control.

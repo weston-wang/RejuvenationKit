@@ -16,6 +16,10 @@ Keep a Changelog format.
 - A tested GSE131754 adapter and end-to-end public rapamycin RNA-seq QC example.
 - A tested Dog Aging Project adapter and real canine longitudinal chemistry QC example.
 - Typed visit-coverage, complete-case retention, and paired-analysis readiness profiles.
+- Visit-level distribution summaries, Tukey-IQR outliers, and attrition-bias diagnostics.
+- Shrinkage-covariance multivariate change detection with whitening and empirical false-alarm
+  calibration.
+- A public canine multimodal example combining longitudinal clinical chemistry and metabolomics.
 - Structured report metrics, severity counts, summaries, documentation, and synthetic tests.
 
 ## [0.1.0] - 2026-07-25

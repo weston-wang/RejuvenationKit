@@ -14,8 +14,15 @@ python examples/public_dog_aging_project.py \
 It downloads and caches the source archive, validates dog and visit identifiers,
 creates typed longitudinal subjects and observations, checks expected-visit
 missingness, reports visit-by-feature coverage, quantifies complete-case retention
-and paired-analysis readiness, and summarizes paired chemistry changes among dogs
-measured at both waves.
+and paired-analysis readiness, profiles distributions and robust outliers, compares
+baseline biomarkers between retained and attrited dogs, and summarizes paired
+chemistry changes among dogs measured at both waves.
+
+The example also uses a deterministic calibration/evaluation split for multivariate change
+detection. It learns the covariance of four correlated chemistry changes from complete
+calibration pairs, whitens held-out change vectors, and reports subjects exceeding an empirical
+5% false-alarm threshold. This demonstrates detection mechanics only: because the cohort is
+observational and untreated, a detection is not evidence of rejuvenation or harm.
 
 ## Normalized visit timing
 

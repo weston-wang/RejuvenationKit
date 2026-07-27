@@ -1,6 +1,15 @@
 """Uncertainty-aware analysis primitives for longitudinal rejuvenation studies."""
 
+from rejuvenationkit.detection import (
+    ChangeDetectionConfig,
+    ChangeDetectionModel,
+    ChangeDetectionReport,
+    MultivariateChangeDetector,
+    SubjectChangeDetection,
+)
 from rejuvenationkit.profiling import (
+    AttritionBias,
+    FeatureDistribution,
     PairedReadiness,
     StudyProfile,
     StudyProfiler,
@@ -19,10 +28,16 @@ from rejuvenationkit.qc import (
 from rejuvenationkit.schemas import Modality, Observation, Study, Subject
 
 __all__ = [
+    "AttritionBias",
     "BaselineLongitudinalQC",
+    "ChangeDetectionConfig",
+    "ChangeDetectionModel",
+    "ChangeDetectionReport",
     "ExpectedVisit",
+    "FeatureDistribution",
     "FeatureRule",
     "Modality",
+    "MultivariateChangeDetector",
     "Observation",
     "PairedReadiness",
     "QCConfig",
@@ -32,6 +47,7 @@ __all__ = [
     "StudyProfile",
     "StudyProfiler",
     "Subject",
+    "SubjectChangeDetection",
     "VisitCoverage",
     "VisitFeature",
     "VisitRetention",

@@ -7,9 +7,11 @@ The package separates validated data contracts from estimation algorithms:
    without mutating input data.
 3. `profiling` reuses those visit policies to quantify coverage, retention, and paired-analysis
    readiness.
-4. `fusion` converts modality-specific evidence into an uncertain joint estimate.
-5. `state` tracks latent biological state through time.
-6. `combinations` estimates interaction effects for multi-intervention experiments.
+4. `detection` whitens correlated longitudinal changes and applies empirically calibrated
+   multivariate detection thresholds.
+5. `fusion` converts modality-specific evidence into an uncertain joint estimate.
+6. `state` tracks latent biological state through time.
+7. `combinations` estimates interaction effects for multi-intervention experiments.
 
 All estimators follow `fit`/`predict`-style protocols and return typed results. Implementations
 should remain assay-neutral; modality adapters can be added separately.
