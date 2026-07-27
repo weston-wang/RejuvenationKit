@@ -98,7 +98,8 @@ missingness, and summarizes paired changes. It has no treatment assignment and i
 rapamycin-effectiveness analysis.
 The [`examples/public_dog_multimodal.py`](examples/public_dog_multimodal.py) workflow combines
 aligned clinical chemistry and metabolomics, then applies held-out covariance-aware change
-detection across both modalities. Install `.[public-data]` to read the source R-data object.
+detection across both modalities. Install `.[public-data]` to read the source R-data object and
+`.[visualization]` to export covariance, detection-score, whitening, and decomposition figures.
 
 ## Contribution workflow
 

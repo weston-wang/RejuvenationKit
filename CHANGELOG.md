@@ -20,6 +20,8 @@ Keep a Changelog format.
 - Shrinkage-covariance multivariate change detection with whitening and empirical false-alarm
   calibration.
 - A public canine multimodal example combining longitudinal clinical chemistry and metabolomics.
+- Optional DSP diagnostic figures for covariance, detection thresholds, whitened innovations, and
+  subject-level component energy.
 - Structured report metrics, severity counts, summaries, documentation, and synthetic tests.
 
 ## [0.1.0] - 2026-07-25

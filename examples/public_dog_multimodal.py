@@ -47,7 +47,14 @@ def main() -> None:
         default=Path("examples/data/cache/dap_baseline_phenotypes.zip"),
     )
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument(
+        "--plots",
+        action="store_true",
+        help="Write covariance, score, whitening, and decomposition PNGs",
+    )
     args = parser.parse_args()
+    if args.plots and args.output_dir is None:
+        parser.error("--plots requires --output-dir")
 
     archive = download_archive(args.cache)
     chemistry = select_visits(read_chemistry(archive))
@@ -151,6 +158,17 @@ def main() -> None:
             report.model_dump_json(indent=2),
             encoding="utf-8",
         )
+        if args.plots:
+            from rejuvenationkit.visualization import save_detection_figures
+
+            paths = save_detection_figures(
+                report,
+                args.output_dir,
+                prefix="multimodal",
+            )
+            print("\nDSP figures:")
+            for path in paths:
+                print(path)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@
 - [x] Add distribution, robust-outlier, and attrition-bias diagnostics.
 - [x] Add covariance-aware multivariate change detection with empirical false-alarm calibration.
 - [x] Validate one detector across aligned longitudinal clinical and metabolomic channels.
+- [x] Add covariance, threshold, whitened-innovation, and component-energy visual diagnostics.
 - [ ] Validate thresholds on a public longitudinal aging dataset.
 - [ ] Add sequential detection across three or more visits with persistence requirements.
 

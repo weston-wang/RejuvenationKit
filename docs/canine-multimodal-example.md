@@ -18,6 +18,15 @@ python examples/public_dog_multimodal.py \
   --output-dir analysis/dog-multimodal
 ```
 
+To produce the standard DSP diagnostic figures:
+
+```bash
+python -m pip install -e ".[public-data,visualization]"
+python examples/public_dog_multimodal.py \
+  --output-dir analysis/dog-multimodal \
+  --plots
+```
+
 Covariance whitening makes the detection statistic invariant to ordinary linear rescaling of
 channels, allowing reported clinical values and technical-adjusted metabolite abundances to enter
 one joint innovation vector. It does not make the modalities biologically interchangeable: the
