@@ -104,6 +104,10 @@ The [`examples/public_dog_sequential.py`](examples/public_dog_sequential.py) wor
 reference dynamics over three Precision waves, reports onset and persistence of unusual held-out
 trajectories, and exports sequential evidence and modality plots. It is an observational
 monitoring demonstration, not a treatment-effect analysis.
+The [`examples/triad_like_rapamycin_sequential.py`](examples/triad_like_rapamycin_sequential.py)
+workflow generates a clearly labeled synthetic 580-dog, seven-visit trial shaped like the public
+TRIAD protocol. It demonstrates responder onset, persistence, transient effects, and
+modality-localized evidence; it contains no DAP treatment outcomes.
 
 ## Contribution workflow
 

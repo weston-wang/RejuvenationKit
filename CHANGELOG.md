@@ -26,6 +26,8 @@ Keep a Changelog format.
   subject-level false-alarm calibration, onset, persistence, and modality evidence.
 - A three-wave public canine demonstration and sequential trajectory, classification, and
   modality-evidence figures.
+- A synthetic TRIAD-like rapamycin example demonstrating individual onset, persistence,
+  transient response, and dominant evidence modality without implying unreleased trial results.
 - Structured report metrics, severity counts, summaries, documentation, and synthetic tests.
 
 ## [0.1.0] - 2026-07-25

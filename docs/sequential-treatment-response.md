@@ -68,3 +68,16 @@ python examples/public_dog_sequential.py \
 
 It uses three Dog Aging Project Precision waves of clinical chemistry and metabolomics. Its
 detections are unusual held-out trajectories, not evidence of rejuvenation or treatment response.
+
+For a treatment-oriented demonstration without inventing public results:
+
+```bash
+python examples/triad_like_rapamycin_sequential.py \
+  --output-dir analysis/triad-like \
+  --plots
+```
+
+This generates 580 synthetic dogs, seven six-month visits, placebo-calibrated normal aging, and
+several injected response phenotypes across echocardiography, activity, cognition, and clinical
+laboratory channels. The schedule and domains resemble the public TRIAD design, but every
+measurement and response label is simulated.
