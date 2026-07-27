@@ -22,6 +22,10 @@ Keep a Changelog format.
 - A public canine multimodal example combining longitudinal clinical chemistry and metabolomics.
 - Optional DSP diagnostic figures for covariance, detection thresholds, whitened innovations, and
   subject-level component energy.
+- Reference-conditioned sequential multimodal detection with irregular-time normalization,
+  subject-level false-alarm calibration, onset, persistence, and modality evidence.
+- A three-wave public canine demonstration and sequential trajectory, classification, and
+  modality-evidence figures.
 - Structured report metrics, severity counts, summaries, documentation, and synthetic tests.
 
 ## [0.1.0] - 2026-07-25

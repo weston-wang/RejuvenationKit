@@ -9,6 +9,7 @@ nav:
   - Phase 1 QC: phase-1-qc.md
   - Multivariate change detection: multivariate-change-detection.md
   - DSP visualization: dsp-visualization.md
+  - Sequential response detection: sequential-treatment-response.md
   - Public-data example: public-data-example.md
   - Canine public-data example: canine-public-data-example.md
   - Canine multimodal example: canine-multimodal-example.md

@@ -14,8 +14,9 @@
 - [x] Add covariance-aware multivariate change detection with empirical false-alarm calibration.
 - [x] Validate one detector across aligned longitudinal clinical and metabolomic channels.
 - [x] Add covariance, threshold, whitened-innovation, and component-energy visual diagnostics.
-- [ ] Validate thresholds on a public longitudinal aging dataset.
-- [ ] Add sequential detection across three or more visits with persistence requirements.
+- [x] Exercise calibrated thresholds on held-out public longitudinal aging data.
+- [x] Add sequential detection across three or more visits with persistence requirements.
+- [ ] Add cross-validated calibration and randomized group-level treatment-effect inference.
 
 ## Phase 2: aging-fusion
 

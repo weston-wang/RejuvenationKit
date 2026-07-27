@@ -43,7 +43,7 @@ return typed result objects rather than unstructured tables.
   absolute and subject-relative visit windows, input ordering, range and unit checks, batch mean
   shifts, treatment/batch confounding, replicate consistency, visit coverage, longitudinal
   retention, paired-analysis readiness, robust outliers, attrition-bias diagnostics, and
-  covariance-aware multivariate change detection.
+  covariance-aware multivariate and sequential change detection.
 - **Phase 2 — `aging-fusion`:** fuse clocks, omics, pathology, imaging, and clinical
   biomarkers while preserving modality-level uncertainty and disagreement.
 - **Phase 3 — `aging-state`:** longitudinal latent-state estimation, smoothing, change-point
@@ -100,6 +100,10 @@ The [`examples/public_dog_multimodal.py`](examples/public_dog_multimodal.py) wor
 aligned clinical chemistry and metabolomics, then applies held-out covariance-aware change
 detection across both modalities. Install `.[public-data]` to read the source R-data object and
 `.[visualization]` to export covariance, detection-score, whitening, and decomposition figures.
+The [`examples/public_dog_sequential.py`](examples/public_dog_sequential.py) workflow learns
+reference dynamics over three Precision waves, reports onset and persistence of unusual held-out
+trajectories, and exports sequential evidence and modality plots. It is an observational
+monitoring demonstration, not a treatment-effect analysis.
 
 ## Contribution workflow
 

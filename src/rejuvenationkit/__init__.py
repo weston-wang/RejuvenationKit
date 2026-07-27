@@ -26,6 +26,15 @@ from rejuvenationkit.qc import (
     VisitFeature,
 )
 from rejuvenationkit.schemas import Modality, Observation, Study, Subject
+from rejuvenationkit.sequential import (
+    ModalityEvidence,
+    SequentialDetectionConfig,
+    SequentialDetectionModel,
+    SequentialDetectionPoint,
+    SequentialDetectionReport,
+    SequentialTreatmentResponseDetector,
+    SubjectSequentialDetection,
+)
 
 __all__ = [
     "AttritionBias",
@@ -37,17 +46,24 @@ __all__ = [
     "FeatureDistribution",
     "FeatureRule",
     "Modality",
+    "ModalityEvidence",
     "MultivariateChangeDetector",
     "Observation",
     "PairedReadiness",
     "QCConfig",
     "QCFinding",
     "QCReport",
+    "SequentialDetectionConfig",
+    "SequentialDetectionModel",
+    "SequentialDetectionPoint",
+    "SequentialDetectionReport",
+    "SequentialTreatmentResponseDetector",
     "Study",
     "StudyProfile",
     "StudyProfiler",
     "Subject",
     "SubjectChangeDetection",
+    "SubjectSequentialDetection",
     "VisitCoverage",
     "VisitFeature",
     "VisitRetention",

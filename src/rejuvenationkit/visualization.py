@@ -12,6 +12,7 @@ from matplotlib.patches import Circle
 from numpy.typing import NDArray
 
 from rejuvenationkit.detection import ChangeDetectionReport, SubjectChangeDetection
+from rejuvenationkit.sequential import SequentialDetectionReport
 
 
 def plot_covariance_structure(
@@ -175,6 +176,148 @@ def save_detection_figures(
         ("scores", plot_detection_scores(report)),
         ("whitened", plot_whitened_innovations(report)),
         ("decomposition", plot_subject_decomposition(report, selected_subject)),
+    )
+    paths: list[Path] = []
+    for name, figure in figures:
+        path = output_dir / f"{prefix}-{name}.png"
+        figure.savefig(path, dpi=dpi, bbox_inches="tight")
+        plt.close(figure)
+        paths.append(path)
+    return tuple(paths)
+
+
+def plot_sequential_trajectories(report: SequentialDetectionReport) -> Figure:
+    """Plot cumulative evidence through time against the calibrated threshold."""
+    figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    for result in report.results:
+        color = "tab:red" if result.detected else "tab:blue"
+        alpha = 0.8 if result.detected else 0.18
+        axis.plot(
+            range(1, len(result.points) + 1),
+            [point.cumulative_score for point in result.points],
+            color=color,
+            alpha=alpha,
+            linewidth=1.5 if result.detected else 0.8,
+        )
+    axis.axhline(
+        report.model.maximum_cumulative_score_threshold,
+        color="black",
+        linestyle="--",
+        label=f"Subject-level threshold ({report.model.false_alarm_rate:.1%} FAR)",
+    )
+    axis.set_xticks(
+        range(1, len(report.visit_ids)),
+        report.visit_ids[1:],
+        rotation=25,
+        ha="right",
+    )
+    axis.set_xlabel("Evidence accumulated through visit")
+    axis.set_ylabel("Cumulative whitened energy")
+    axis.set_title("Sequential departures from reference aging dynamics")
+    axis.grid(alpha=0.2)
+    axis.legend()
+    return figure
+
+
+def plot_sequential_classification(report: SequentialDetectionReport) -> Figure:
+    """Plot peak evidence grouped by undetected, transient, and persistent status."""
+    groups = {
+        "Undetected": [item for item in report.results if not item.detected],
+        "Unconfirmed": [
+            item
+            for item in report.results
+            if item.detected and not item.transient and not item.persistent
+        ],
+        "Transient": [item for item in report.results if item.transient],
+        "Persistent": [item for item in report.results if item.persistent],
+    }
+    figure, axis = plt.subplots(figsize=(7, 4.5), constrained_layout=True)
+    for index, (label, results) in enumerate(groups.items()):
+        axis.scatter(
+            np.full(len(results), index),
+            [item.peak_cumulative_score for item in results],
+            alpha=0.65,
+            label=f"{label} (n={len(results)})",
+        )
+    axis.axhline(
+        report.model.maximum_cumulative_score_threshold,
+        color="black",
+        linestyle="--",
+        linewidth=1.2,
+    )
+    axis.set_xticks(range(len(groups)), groups)
+    axis.set_ylabel("Peak cumulative score")
+    axis.set_title("Sequential response classification")
+    axis.grid(axis="y", alpha=0.2)
+    axis.legend()
+    return figure
+
+
+def plot_sequential_modality_evidence(
+    report: SequentialDetectionReport,
+    *,
+    limit: int = 12,
+) -> Figure:
+    """Plot peak within-modality evidence for the strongest subjects."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    selected = sorted(
+        report.results,
+        key=lambda item: item.peak_cumulative_score,
+        reverse=True,
+    )[:limit]
+    modalities = sorted(
+        {
+            evidence.modality.value if evidence.modality is not None else "unspecified"
+            for item in selected
+            for evidence in item.peak_modality_evidence
+        }
+    )
+    figure, axis = plt.subplots(figsize=(9, 5), constrained_layout=True)
+    x = np.arange(len(selected))
+    width = 0.8 / max(len(modalities), 1)
+    for modality_index, modality in enumerate(modalities):
+        scores = [
+            next(
+                (
+                    evidence.score
+                    for evidence in item.peak_modality_evidence
+                    if (evidence.modality.value if evidence.modality is not None else "unspecified")
+                    == modality
+                ),
+                0.0,
+            )
+            for item in selected
+        ]
+        axis.bar(
+            x + (modality_index - (len(modalities) - 1) / 2) * width,
+            scores,
+            width,
+            label=modality,
+        )
+    axis.set_xticks(x, [item.subject_id for item in selected], rotation=45, ha="right")
+    axis.set_ylabel("Within-modality peak evidence")
+    axis.set_title("Channels driving the strongest sequential departures")
+    axis.legend()
+    axis.grid(axis="y", alpha=0.2)
+    return figure
+
+
+def save_sequential_figures(
+    report: SequentialDetectionReport,
+    output_dir: Path,
+    *,
+    prefix: str = "sequential",
+    dpi: int = 160,
+) -> tuple[Path, ...]:
+    """Render the standard sequential diagnostic figure set."""
+    if dpi <= 0:
+        raise ValueError("dpi must be positive")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    figures = (
+        ("trajectories", plot_sequential_trajectories(report)),
+        ("classification", plot_sequential_classification(report)),
+        ("modalities", plot_sequential_modality_evidence(report)),
     )
     paths: list[Path] = []
     for name, figure in figures:
