@@ -11,9 +11,11 @@ The package separates validated data contracts from estimation algorithms:
    multivariate detection thresholds.
 5. `sequential` learns reference aging dynamics and monitors onset and persistence across repeated
    multimodal visits.
-6. `fusion` converts modality-specific evidence into an uncertain joint estimate.
-7. `state` tracks latent biological state through time.
-8. `combinations` estimates interaction effects for multi-intervention experiments.
+6. `treatment_effect` uses out-of-fold control calibration and randomized-label inference to
+   estimate longitudinal group effects.
+7. `fusion` converts modality-specific evidence into an uncertain joint estimate.
+8. `state` tracks latent biological state through time.
+9. `combinations` estimates interaction effects for multi-intervention experiments.
 
 All estimators follow `fit`/`predict`-style protocols and return typed results. Implementations
 should remain assay-neutral; modality adapters can be added separately.

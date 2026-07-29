@@ -123,6 +123,15 @@ Profiles quantify usable data but do not test treatment effects. In a cross-sect
 different subjects are collected at each age, visit coverage remains useful while paired
 longitudinal readiness is not scientifically applicable.
 
+## Randomized treatment effects
+
+After QC and readiness profiling pass, `RandomizedTreatmentEffectEvaluator` compares prespecified
+treated and control groups across one or more follow-up visits. It produces signed,
+feature-specific differences in change from baseline, bootstrap confidence intervals, a
+covariance-aware permutation test, and subject-level scores calibrated entirely from out-of-fold
+controls. See [Randomized treatment-effect inference](randomized-treatment-effects.md) for the
+workflow and interpretation limits.
+
 ## Expected-visit semantics
 
 Visit windows are inclusive. By default, a visit applies to every study subject. Set

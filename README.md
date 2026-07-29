@@ -44,7 +44,8 @@ return typed result objects rather than unstructured tables.
   shifts, treatment/batch/site/plate/lot/timepoint confounding, replicate consistency, visit
   coverage, longitudinal
   retention, paired-analysis readiness, robust outliers, attrition-bias diagnostics, and
-  covariance-aware multivariate and sequential change detection.
+  covariance-aware multivariate and sequential change detection, leakage-safe control
+  calibration, and randomized longitudinal treatment-effect inference.
 - **Phase 2 — `aging-fusion`:** fuse clocks, omics, pathology, imaging, and clinical
   biomarkers while preserving modality-level uncertainty and disagreement.
 - **Phase 3 — `aging-state`:** longitudinal latent-state estimation, smoothing, change-point
@@ -104,6 +105,9 @@ detection across both modalities. Install `.[public-data]` to read the source R-
 The [`examples/gene_therapy_confounding.py`](examples/gene_therapy_confounding.py) workflow
 demonstrates how a superficially complete canine gene-therapy study can still be unusable because
 site, vector lot, and visit-specific plates overlap the biological contrasts.
+The [`examples/randomized_rapamycin_effect.py`](examples/randomized_rapamycin_effect.py) workflow
+demonstrates out-of-fold control calibration, covariance-aware randomization testing, and
+feature-level longitudinal effect intervals in a synthetic 60-dog trial.
 The [`examples/public_dog_sequential.py`](examples/public_dog_sequential.py) workflow learns
 reference dynamics over three Precision waves, reports onset and persistence of unusual held-out
 trajectories, and exports sequential evidence and modality plots. It is an observational

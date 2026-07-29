@@ -7,6 +7,8 @@ Keep a Changelog format.
 
 ### Added
 
+- Out-of-fold control calibration, randomized multivariate treatment-effect tests, bootstrap
+  channel intervals, and a synthetic canine rapamycin example completing the Phase 1 roadmap.
 - Configurable Phase 1 QC for values, units, required-feature missingness, temporal ordering,
   technical-replicate disagreement, and batch mean shifts.
 - Absolute expected-visit schedules with inclusive tolerance windows, subject/cohort selectors,

@@ -37,6 +37,14 @@ from rejuvenationkit.sequential import (
     SequentialTreatmentResponseDetector,
     SubjectSequentialDetection,
 )
+from rejuvenationkit.treatment_effect import (
+    CrossValidatedSubjectScore,
+    FeatureTreatmentEffect,
+    RandomizedTreatmentEffectEvaluator,
+    TreatmentEffectConfig,
+    TreatmentEffectReport,
+    VisitTreatmentEffect,
+)
 
 __all__ = [
     "AttritionBias",
@@ -44,11 +52,13 @@ __all__ = [
     "ChangeDetectionConfig",
     "ChangeDetectionModel",
     "ChangeDetectionReport",
+    "CrossValidatedSubjectScore",
     "ExpectedVisit",
     "ExperimentalFactor",
     "FactorSource",
     "FeatureDistribution",
     "FeatureRule",
+    "FeatureTreatmentEffect",
     "Modality",
     "ModalityEvidence",
     "MultivariateChangeDetector",
@@ -57,6 +67,7 @@ __all__ = [
     "QCConfig",
     "QCFinding",
     "QCReport",
+    "RandomizedTreatmentEffectEvaluator",
     "SequentialDetectionConfig",
     "SequentialDetectionModel",
     "SequentialDetectionPoint",
@@ -68,8 +79,11 @@ __all__ = [
     "Subject",
     "SubjectChangeDetection",
     "SubjectSequentialDetection",
+    "TreatmentEffectConfig",
+    "TreatmentEffectReport",
     "VisitCoverage",
     "VisitFeature",
     "VisitRetention",
+    "VisitTreatmentEffect",
 ]
 __version__ = "0.1.0"

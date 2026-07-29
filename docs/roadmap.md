@@ -17,7 +17,7 @@
 - [x] Add covariance, threshold, whitened-innovation, and component-energy visual diagnostics.
 - [x] Exercise calibrated thresholds on held-out public longitudinal aging data.
 - [x] Add sequential detection across three or more visits with persistence requirements.
-- [ ] Add cross-validated calibration and randomized group-level treatment-effect inference.
+- [x] Add cross-validated calibration and randomized group-level treatment-effect inference.
 
 ## Phase 2: aging-fusion
 
