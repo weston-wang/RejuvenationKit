@@ -9,7 +9,8 @@
 - [x] Add subject-relative schedules anchored to enrollment or intervention time.
 - [x] Add treatment/batch confounding diagnostics.
 - [x] Add visit coverage, complete-case retention, and paired-analysis readiness profiles.
-- [ ] Add visit/timepoint and study-site confounding diagnostics.
+- [x] Add visit/timepoint, site, clinic, plate, run, operator, lot, manufacturing-batch, and
+  sequencing-lane confounding diagnostics.
 - [x] Add distribution, robust-outlier, and attrition-bias diagnostics.
 - [x] Add covariance-aware multivariate change detection with empirical false-alarm calibration.
 - [x] Validate one detector across aligned longitudinal clinical and metabolomic channels.

@@ -41,7 +41,8 @@ return typed result objects rather than unstructured tables.
 
 - **Phase 1 — `aging-qc` (baseline implemented):** subject- and visit-level missingness,
   absolute and subject-relative visit windows, input ordering, range and unit checks, batch mean
-  shifts, treatment/batch confounding, replicate consistency, visit coverage, longitudinal
+  shifts, treatment/batch/site/plate/lot/timepoint confounding, replicate consistency, visit
+  coverage, longitudinal
   retention, paired-analysis readiness, robust outliers, attrition-bias diagnostics, and
   covariance-aware multivariate and sequential change detection.
 - **Phase 2 — `aging-fusion`:** fuse clocks, omics, pathology, imaging, and clinical
@@ -100,6 +101,9 @@ The [`examples/public_dog_multimodal.py`](examples/public_dog_multimodal.py) wor
 aligned clinical chemistry and metabolomics, then applies held-out covariance-aware change
 detection across both modalities. Install `.[public-data]` to read the source R-data object and
 `.[visualization]` to export covariance, detection-score, whitening, and decomposition figures.
+The [`examples/gene_therapy_confounding.py`](examples/gene_therapy_confounding.py) workflow
+demonstrates how a superficially complete canine gene-therapy study can still be unusable because
+site, vector lot, and visit-specific plates overlap the biological contrasts.
 The [`examples/public_dog_sequential.py`](examples/public_dog_sequential.py) workflow learns
 reference dynamics over three Precision waves, reports onset and persistence of unusual held-out
 trajectories, and exports sequential evidence and modality plots. It is an observational

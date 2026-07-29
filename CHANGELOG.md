@@ -29,6 +29,8 @@ Keep a Changelog format.
 - A synthetic TRIAD-like rapamycin example demonstrating individual onset, persistence,
   transient response, and dominant evidence modality without implying unreleased trial results.
 - Structured report metrics, severity counts, summaries, documentation, and synthetic tests.
+- Generalized experimental-confounding diagnostics for site, clinic, visit/timepoint, plate,
+  assay run, operator, vector lot, manufacturing batch, sequencing lane, and custom factors.
 
 ## [0.1.0] - 2026-07-25
 

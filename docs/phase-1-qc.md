@@ -26,10 +26,12 @@ baseline values between retained and missing-follow-up subjects.
 | Technical replicates exceed tolerance | `replicate_disagreement` | Warning |
 | Batch mean differs from other batches | `batch_mean_shift` | Warning |
 | Cohort or intervention is strongly associated with batch | `batch_assignment_confounding` | Error |
+| Cohort or intervention is associated with site, clinic, plate, run, operator, lot, manufacturing batch, or sequencing lane | `experimental_assignment_confounding` | Warning or error |
+| Expected visit/timepoint is associated with an experimental factor | `timepoint_factor_confounding` | Warning or error |
 
 Batch detection uses a standardized mean difference based on pooled within-group variance. It is
-a screening diagnostic, not proof of a batch effect. Confounding between batch, treatment, time,
-and cohort is screened separately using Cramér's V.
+a screening diagnostic, not proof of a batch effect. Confounding between experimental factors,
+treatment, time, and cohort is screened separately using Cramér's V.
 
 ## Configuration
 
@@ -70,6 +72,8 @@ config = QCConfig(
     replicate_relative_tolerance=0.20,
     batch_z_threshold=3.0,
     minimum_batch_size=3,
+    confounding_warning_threshold=0.50,
+    batch_confounding_threshold=0.80,
 )
 
 report = BaselineLongitudinalQC(config).run(study)
@@ -163,19 +167,56 @@ Each expected visit must use exactly one schedule mode: `scheduled_at` for a com
 or `anchor_id` plus `offset` for subject-relative timing. A missing anchor produces
 `visit_anchor_missing`; it is not misclassified as a missed clinic visit.
 
-## Treatment/batch confounding
+## Experimental confounding
 
-For each modality and feature with batch identifiers, the baseline pipeline builds contingency
-tables for cohort and every named intervention. It reports `batch_assignment_confounding` when:
+For each modality and feature, the baseline pipeline builds contingency tables for cohort and
+every named intervention against available experimental nuisance factors. The default factors
+are:
 
-- there are at least two groups and two batches;
+- `batch_id`;
+- `site` and `clinic`;
+- `plate` and `assay_run`;
+- `operator`;
+- `vector_lot` and `manufacturing_batch`; and
+- `sequencing_lane`.
+
+The named factors are read from `Observation.attributes`, with fallback to
+`Subject.attributes`. This permits site to remain a subject-level assignment while plate and
+assay run vary by sample.
+
+A diagnostic is evaluated when:
+
+- there are at least two assignment groups and two nuisance levels;
 - every comparison group has at least `minimum_confounding_group_size` subjects; and
-- Cramér's V meets `batch_confounding_threshold`, which defaults to 0.80.
+- Cramér's V meets `confounding_warning_threshold`, which defaults to 0.50.
 
-This catches designs such as every rapamycin sample being processed in batch A and every control
-sample in batch B. It does not claim that batch caused the measured outcome; it says the treatment
-effect cannot be cleanly separated from batch for that feature. Disable the diagnostic with
-`check_batch_confounding=False` only when another documented analysis handles the issue.
+Associations below `batch_confounding_threshold` are warnings; associations at or above that
+threshold are errors. The legacy `batch_assignment_confounding` code is preserved for batch
+assignment errors. Other factors use `experimental_assignment_confounding`.
+
+When expected visits are configured, the same engine tests whether visit identity is associated
+with each factor. This catches longitudinal designs in which all baseline samples use one plate or
+assay version and all follow-up samples use another. Such designs cannot distinguish biological
+change from processing change.
+
+This does not claim that the nuisance factor caused the outcome. It says the intended biological
+contrast cannot be cleanly separated from experimental handling. Disable all generalized checks
+with `check_experimental_confounding=False`; `check_batch_confounding=False` disables only the
+legacy batch factor.
+
+Custom factors can be configured explicitly:
+
+```python
+from rejuvenationkit import ExperimentalFactor, QCConfig
+
+config = QCConfig(
+    experimental_factors=(
+        ExperimentalFactor(name="site", attribute="site"),
+        ExperimentalFactor(name="capsid_lot", attribute="capsid_lot"),
+        ExperimentalFactor(name="histology_scanner", attribute="scanner_id"),
+    )
+)
+```
 
 ## Interpretation limits
 
@@ -186,8 +227,8 @@ effect cannot be cleanly separated from batch for that feature. Disable the diag
   batch but distinct replicate identifiers.
 - Batch screening requires the configured minimum number of observations both inside and outside
   the evaluated batch.
-- Confounding screening currently covers cohort and binary exposure to each named intervention.
-  Visit/timepoint and site confounding remain future extensions.
+- Confounding screening covers cohort and binary exposure to each named intervention. Encode dose,
+  construct, or indication groups as cohorts until arbitrary assignment-factor policies are added.
 - A passing report establishes only that configured checks found no errors.
 - Retention is calculated only between consecutive visits in configuration order.
 - A zero denominator produces a fraction of zero rather than an undefined or infinite value.

@@ -60,6 +60,7 @@ class Observation(BaseModel):
     batch_id: str | None = None
     replicate_id: str | None = None
     source_uri: str | None = None
+    attributes: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def require_timezone(self) -> Observation:

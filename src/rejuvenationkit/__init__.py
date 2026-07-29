@@ -19,6 +19,8 @@ from rejuvenationkit.profiling import (
 from rejuvenationkit.qc import (
     BaselineLongitudinalQC,
     ExpectedVisit,
+    ExperimentalFactor,
+    FactorSource,
     FeatureRule,
     QCConfig,
     QCFinding,
@@ -43,6 +45,8 @@ __all__ = [
     "ChangeDetectionModel",
     "ChangeDetectionReport",
     "ExpectedVisit",
+    "ExperimentalFactor",
+    "FactorSource",
     "FeatureDistribution",
     "FeatureRule",
     "Modality",

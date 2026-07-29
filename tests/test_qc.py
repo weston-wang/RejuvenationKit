@@ -6,6 +6,8 @@ from pydantic import ValidationError
 from rejuvenationkit.qc import (
     BaselineLongitudinalQC,
     ExpectedVisit,
+    ExperimentalFactor,
+    FactorSource,
     FeatureRule,
     QCConfig,
     Severity,
@@ -25,6 +27,7 @@ def row(
     unit: str = "g",
     batch_id: str | None = None,
     replicate_id: str | None = None,
+    attributes: dict[str, str | int | float | bool] | None = None,
 ) -> Observation:
     return Observation(
         subject_id=subject_id,
@@ -35,6 +38,7 @@ def row(
         unit=unit,
         batch_id=batch_id,
         replicate_id=replicate_id,
+        attributes=attributes or {},
     )
 
 
@@ -415,3 +419,141 @@ def test_batch_confounding_check_can_be_disabled() -> None:
         confounding_study(balanced=False)
     )
     assert report.findings == ()
+
+
+def experimental_confounding_study(
+    *,
+    treated_lots: tuple[str, ...],
+    control_lots: tuple[str, ...],
+) -> Study:
+    treated = tuple(
+        Subject(subject_id=f"r{index}", cohort="treated", interventions=("gene_therapy",))
+        for index in range(1, len(treated_lots) + 1)
+    )
+    controls = tuple(
+        Subject(subject_id=f"c{index}", cohort="control")
+        for index in range(1, len(control_lots) + 1)
+    )
+    subjects = (*treated, *controls)
+    lots = {
+        **{subject.subject_id: lot for subject, lot in zip(treated, treated_lots, strict=True)},
+        **{subject.subject_id: lot for subject, lot in zip(controls, control_lots, strict=True)},
+    }
+    observations = tuple(
+        row(
+            subject.subject_id,
+            30,
+            attributes={"vector_lot": lots[subject.subject_id]},
+        )
+        for subject in subjects
+    )
+    return Study(study_id="vector-lot", subjects=subjects, observations=observations)
+
+
+def test_vector_lot_confounding_detects_complete_treatment_segregation() -> None:
+    report = BaselineLongitudinalQC().run(
+        experimental_confounding_study(
+            treated_lots=("A", "A", "A"),
+            control_lots=("B", "B", "B"),
+        )
+    )
+    findings = [
+        finding
+        for finding in report.findings
+        if finding.code == "experimental_assignment_confounding"
+        and finding.context["factor"] == "intervention:gene_therapy"
+    ]
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    assert findings[0].context["nuisance_factor"] == "vector_lot"
+    assert findings[0].context["association"] == pytest.approx(1)
+
+
+def test_partial_vector_lot_confounding_is_a_warning() -> None:
+    report = BaselineLongitudinalQC().run(
+        experimental_confounding_study(
+            treated_lots=("A", "A", "A"),
+            control_lots=("A", "B", "B"),
+        )
+    )
+    finding = next(
+        item
+        for item in report.findings
+        if item.code == "experimental_assignment_confounding"
+        and item.context["factor"] == "intervention:gene_therapy"
+    )
+    assert finding.severity is Severity.WARNING
+    association = finding.context["association"]
+    assert isinstance(association, float)
+    assert 0.5 <= association < 0.8
+
+
+def test_timepoint_plate_confounding_is_detected() -> None:
+    subjects = tuple(Subject(subject_id=f"s{index}", cohort="all") for index in range(4))
+    observations = tuple(
+        row(
+            subject.subject_id,
+            30 + visit_index,
+            day=visit_index * 7,
+            attributes={"plate": "baseline-plate" if visit_index == 0 else "followup-plate"},
+        )
+        for subject in subjects
+        for visit_index in range(2)
+    )
+    visits = (
+        ExpectedVisit(
+            visit_id="baseline",
+            scheduled_at=START,
+            required_features=(VisitFeature(feature="body_mass"),),
+        ),
+        ExpectedVisit(
+            visit_id="week-1",
+            scheduled_at=START + timedelta(days=7),
+            required_features=(VisitFeature(feature="body_mass"),),
+        ),
+    )
+    report = BaselineLongitudinalQC(QCConfig(expected_visits=visits)).run(
+        Study(study_id="plate-time", subjects=subjects, observations=observations)
+    )
+    finding = next(item for item in report.findings if item.code == "timepoint_factor_confounding")
+    assert finding.severity is Severity.ERROR
+    assert finding.context["nuisance_factor"] == "plate"
+    assert finding.context["factor"] == "timepoint"
+
+
+def test_custom_subject_attribute_factor_and_disable_switch() -> None:
+    subjects = (
+        Subject(subject_id="a1", cohort="treated", attributes={"clinic": "north"}),
+        Subject(subject_id="a2", cohort="treated", attributes={"clinic": "north"}),
+        Subject(subject_id="b1", cohort="control", attributes={"clinic": "south"}),
+        Subject(subject_id="b2", cohort="control", attributes={"clinic": "south"}),
+    )
+    study = Study(
+        study_id="sites",
+        subjects=subjects,
+        observations=tuple(row(subject.subject_id, 30) for subject in subjects),
+    )
+    report = BaselineLongitudinalQC().run(study)
+    assert "experimental_assignment_confounding" in codes(report)
+
+    disabled = BaselineLongitudinalQC(QCConfig(check_experimental_confounding=False)).run(study)
+    assert disabled.findings == ()
+
+
+def test_experimental_factor_configuration_is_validated() -> None:
+    with pytest.raises(ValidationError, match="require an attribute"):
+        ExperimentalFactor(name="site")
+    with pytest.raises(ValidationError, match="cannot define"):
+        ExperimentalFactor(
+            name="batch",
+            source=FactorSource.BATCH_ID,
+            attribute="batch",
+        )
+    factor = ExperimentalFactor(name="site", attribute="site")
+    with pytest.raises(ValidationError, match="unique names"):
+        QCConfig(experimental_factors=(factor, factor))
+    with pytest.raises(ValidationError, match="cannot exceed"):
+        QCConfig(
+            confounding_warning_threshold=0.9,
+            batch_confounding_threshold=0.8,
+        )

@@ -22,6 +22,55 @@ class Severity(StrEnum):
     ERROR = "error"
 
 
+class FactorSource(StrEnum):
+    """Location from which an experimental nuisance factor is read."""
+
+    BATCH_ID = "batch_id"
+    ATTRIBUTE = "attribute"
+
+
+class ExperimentalFactor(BaseModel):
+    """A batch, site, lot, plate, or other experimental nuisance factor.
+
+    Attribute factors first use an observation attribute and then fall back to
+    the corresponding subject attribute.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(min_length=1)
+    source: FactorSource = FactorSource.ATTRIBUTE
+    attribute: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_source(self) -> ExperimentalFactor:
+        """Require an attribute key only for attribute-backed factors."""
+        if self.source is FactorSource.ATTRIBUTE and self.attribute is None:
+            raise ValueError("attribute factors require an attribute key")
+        if self.source is FactorSource.BATCH_ID and self.attribute is not None:
+            raise ValueError("batch_id factors cannot define an attribute key")
+        return self
+
+
+def _default_experimental_factors() -> tuple[ExperimentalFactor, ...]:
+    return (
+        ExperimentalFactor(name="batch", source=FactorSource.BATCH_ID),
+        *(
+            ExperimentalFactor(name=name, attribute=name)
+            for name in (
+                "site",
+                "clinic",
+                "plate",
+                "assay_run",
+                "operator",
+                "vector_lot",
+                "manufacturing_batch",
+                "sequencing_lane",
+            )
+        ),
+    )
+
+
 class FeatureRule(BaseModel):
     """Validation policy for one measured feature."""
 
@@ -142,6 +191,11 @@ class QCConfig(BaseModel):
     check_observations_outside_visit_windows: bool = True
     check_batch_confounding: bool = True
     batch_confounding_threshold: float = Field(default=0.80, ge=0, le=1)
+    check_experimental_confounding: bool = True
+    experimental_factors: tuple[ExperimentalFactor, ...] = Field(
+        default_factory=_default_experimental_factors
+    )
+    confounding_warning_threshold: float = Field(default=0.50, ge=0, le=1)
     minimum_confounding_group_size: int = Field(default=2, ge=1)
 
     @model_validator(mode="after")
@@ -155,6 +209,11 @@ class QCConfig(BaseModel):
         visit_ids = [visit.visit_id for visit in self.expected_visits]
         if len(visit_ids) != len(set(visit_ids)):
             raise ValueError("expected visits must have unique visit_id values")
+        factor_names = [factor.name for factor in self.experimental_factors]
+        if len(factor_names) != len(set(factor_names)):
+            raise ValueError("experimental factors must have unique names")
+        if self.confounding_warning_threshold > self.batch_confounding_threshold:
+            raise ValueError("confounding warning threshold cannot exceed error threshold")
         return self
 
 
@@ -232,7 +291,7 @@ class BaselineLongitudinalQC:
             *self._check_temporal_order(study),
             *self._check_replicates(study),
             *self._check_batch_drift(study),
-            *self._check_batch_confounding(study),
+            *self._check_experimental_confounding(study),
         ]
         findings.sort(
             key=lambda item: (
@@ -493,74 +552,161 @@ class BaselineLongitudinalQC:
             )
         return findings
 
-    def _check_batch_confounding(self, study: Study) -> list[QCFinding]:
-        if not self.config.check_batch_confounding:
+    def _check_experimental_confounding(self, study: Study) -> list[QCFinding]:
+        if not self.config.check_experimental_confounding:
             return []
         subject_lookup = {subject.subject_id: subject for subject in study.subjects}
-        strata: defaultdict[tuple[Modality, str], set[tuple[str, str]]] = defaultdict(set)
-        for row in study.observations:
-            if row.batch_id is not None:
-                strata[(row.modality, row.feature)].add((row.subject_id, row.batch_id))
-
         interventions = sorted(
             {name for subject in study.subjects for name in subject.interventions}
         )
         findings: list[QCFinding] = []
-        for (modality, feature), assignments in strata.items():
-            factors: list[tuple[str, dict[str, str]]] = [
-                (
-                    "cohort",
-                    {
-                        subject_id: subject_lookup[subject_id].cohort
-                        for subject_id, _ in assignments
-                    },
+        for nuisance in self.config.experimental_factors:
+            if nuisance.source is FactorSource.BATCH_ID and not self.config.check_batch_confounding:
+                continue
+            strata: defaultdict[tuple[Modality, str], set[tuple[str, str]]] = defaultdict(set)
+            timepoint_records: set[tuple[str, str, str]] = set()
+            for row in study.observations:
+                level = _experimental_factor_level(
+                    row,
+                    subject_lookup[row.subject_id],
+                    nuisance,
                 )
-            ]
-            factors.extend(
-                (
-                    f"intervention:{intervention}",
-                    {
-                        subject_id: (
-                            "exposed"
-                            if intervention in subject_lookup[subject_id].interventions
-                            else "unexposed"
-                        )
-                        for subject_id, _ in assignments
-                    },
+                if level is None:
+                    continue
+                strata[(row.modality, row.feature)].add((row.subject_id, level))
+                timepoint_records.update(
+                    (row.subject_id, visit_id, level)
+                    for visit_id in _matching_visit_ids(
+                        row,
+                        subject_lookup[row.subject_id],
+                        self.config.expected_visits,
+                    )
                 )
-                for intervention in interventions
-            )
-            for factor, labels in factors:
-                group_sizes = Counter(labels.values())
-                batches = {batch_id for _, batch_id in assignments}
-                if (
-                    len(group_sizes) < 2
-                    or len(batches) < 2
-                    or min(group_sizes.values()) < self.config.minimum_confounding_group_size
-                ):
-                    continue
-                association = _cramers_v(assignments, labels)
-                if association < self.config.batch_confounding_threshold:
-                    continue
-                findings.append(
-                    QCFinding(
-                        code="batch_assignment_confounding",
-                        severity=Severity.ERROR,
-                        message=(
-                            f"{factor} is strongly associated with batch for "
-                            f"{modality.value}/{feature} (Cramér's V={association:.2f})"
-                        ),
-                        subject_ids=tuple(sorted(labels)),
-                        context={
-                            "factor": factor,
-                            "feature": feature,
-                            "modality": modality.value,
-                            "association": association,
-                            "batches": len(batches),
+            for (modality, feature), assignments in strata.items():
+                assignment_factors: list[tuple[str, dict[str, str]]] = [
+                    (
+                        f"intervention:{intervention}",
+                        {
+                            subject_id: (
+                                "exposed"
+                                if intervention in subject_lookup[subject_id].interventions
+                                else "unexposed"
+                            )
+                            for subject_id, _ in assignments
+                        },
+                    )
+                    for intervention in interventions
+                ]
+                assignment_factors.append(
+                    (
+                        "cohort",
+                        {
+                            subject_id: subject_lookup[subject_id].cohort
+                            for subject_id, _ in assignments
                         },
                     )
                 )
+                seen_partitions: set[tuple[tuple[str, ...], ...]] = set()
+                for assignment_factor, labels in assignment_factors:
+                    partition = tuple(
+                        sorted(
+                            tuple(
+                                sorted(
+                                    subject_id
+                                    for subject_id, observed_label in labels.items()
+                                    if observed_label == label
+                                )
+                            )
+                            for label in set(labels.values())
+                        )
+                    )
+                    if partition in seen_partitions:
+                        continue
+                    seen_partitions.add(partition)
+                    pairs = tuple((labels[subject_id], level) for subject_id, level in assignments)
+                    finding = self._confounding_finding(
+                        pairs=pairs,
+                        nuisance=nuisance,
+                        assignment_factor=assignment_factor,
+                        subject_ids=tuple(sorted(labels)),
+                        modality=modality,
+                        feature=feature,
+                    )
+                    if finding is not None:
+                        findings.append(finding)
+            timepoint_finding = self._confounding_finding(
+                pairs=tuple((visit_id, level) for _, visit_id, level in timepoint_records),
+                nuisance=nuisance,
+                assignment_factor="timepoint",
+            )
+            if timepoint_finding is not None:
+                findings.append(timepoint_finding)
         return findings
+
+    def _confounding_finding(
+        self,
+        *,
+        pairs: tuple[tuple[str, str], ...],
+        nuisance: ExperimentalFactor,
+        assignment_factor: str,
+        subject_ids: tuple[str, ...] = (),
+        modality: Modality | None = None,
+        feature: str | None = None,
+    ) -> QCFinding | None:
+        assignment_counts = Counter(assignment for assignment, _ in pairs)
+        nuisance_levels = {level for _, level in pairs}
+        if (
+            len(assignment_counts) < 2
+            or len(nuisance_levels) < 2
+            or min(assignment_counts.values()) < self.config.minimum_confounding_group_size
+        ):
+            return None
+        association = _cramers_v_pairs(pairs)
+        if association < self.config.confounding_warning_threshold:
+            return None
+        severity = (
+            Severity.ERROR
+            if association >= self.config.batch_confounding_threshold
+            else Severity.WARNING
+        )
+        is_batch = nuisance.source is FactorSource.BATCH_ID
+        code = (
+            "batch_assignment_confounding"
+            if is_batch and assignment_factor != "timepoint"
+            else (
+                "timepoint_factor_confounding"
+                if assignment_factor == "timepoint"
+                else "experimental_assignment_confounding"
+            )
+        )
+        context: dict[str, str | int | float | bool] = {
+            "factor": assignment_factor,
+            "nuisance_factor": nuisance.name,
+            "factor_source": nuisance.source.value,
+            "association": association,
+            "nuisance_levels": len(nuisance_levels),
+            "records": len(pairs),
+        }
+        if modality is not None:
+            context["modality"] = modality.value
+        if feature is not None:
+            context["feature"] = feature
+        strength = "strongly" if severity is Severity.ERROR else "moderately"
+        scope = (
+            f" for {modality.value}/{feature}"
+            if modality is not None and feature is not None
+            else ""
+        )
+        return QCFinding(
+            code=code,
+            severity=severity,
+            message=(
+                f"{assignment_factor} is {strength} associated with "
+                f"{nuisance.name}{scope} (Cramér's V={association:.2f})"
+            ),
+            subject_ids=subject_ids,
+            context=context,
+        )
 
     def _check_missingness(self, study: Study) -> list[QCFinding]:
         findings: list[QCFinding] = []
@@ -744,26 +890,56 @@ def _visit_schedule_description(visit: ExpectedVisit) -> str:
     return f"{visit.anchor_id}{visit.offset.total_seconds():+g}s"
 
 
-def _cramers_v(assignments: set[tuple[str, str]], labels: dict[str, str]) -> float:
-    groups = sorted(set(labels.values()))
-    batches = sorted({batch_id for _, batch_id in assignments})
-    counts = {
-        (group, batch): sum(
-            1
-            for subject_id, batch_id in assignments
-            if labels[subject_id] == group and batch_id == batch
-        )
-        for group in groups
-        for batch in batches
+def _experimental_factor_level(
+    row: Observation,
+    subject: Subject,
+    factor: ExperimentalFactor,
+) -> str | None:
+    if factor.source is FactorSource.BATCH_ID:
+        return row.batch_id
+    if factor.attribute is None:
+        return None
+    value = row.attributes.get(factor.attribute)
+    if value is None:
+        value = subject.attributes.get(factor.attribute)
+    return None if value is None else str(value)
+
+
+def _matching_visit_ids(
+    row: Observation,
+    subject: Subject,
+    visits: tuple[ExpectedVisit, ...],
+) -> tuple[str, ...]:
+    matches: list[str] = []
+    for visit in visits:
+        if not _visit_applies(visit, subject.subject_id, subject.cohort):
+            continue
+        target = _visit_target(visit, subject)
+        if target is None or not _inside_visit_window(row, visit, target):
+            continue
+        if any(_matches_visit_feature(row, requirement) for requirement in visit.required_features):
+            matches.append(visit.visit_id)
+    return tuple(matches)
+
+
+def _cramers_v_pairs(pairs: tuple[tuple[str, str], ...]) -> float:
+    assignments = sorted({assignment for assignment, _ in pairs})
+    nuisance_levels = sorted({level for _, level in pairs})
+    counts = Counter(pairs)
+    total = len(pairs)
+    row_totals = {
+        assignment: sum(counts[assignment, level] for level in nuisance_levels)
+        for assignment in assignments
     }
-    total = sum(counts.values())
-    row_totals = {group: sum(counts[group, batch] for batch in batches) for group in groups}
-    column_totals = {batch: sum(counts[group, batch] for group in groups) for batch in batches}
+    column_totals = {
+        level: sum(counts[assignment, level] for assignment in assignments)
+        for level in nuisance_levels
+    }
     chi_square = 0.0
-    for group in groups:
-        for batch in batches:
-            expected = row_totals[group] * column_totals[batch] / total
+    for assignment in assignments:
+        for level in nuisance_levels:
+            expected = row_totals[assignment] * column_totals[level] / total
             if expected > 0:
-                chi_square += (counts[group, batch] - expected) ** 2 / expected
-    denominator = total * min(len(groups) - 1, len(batches) - 1)
+                chi_square += (counts[assignment, level] - expected) ** 2 / expected
+    denominator = total * min(len(assignments) - 1, len(nuisance_levels) - 1)
     return math.sqrt(chi_square / denominator) if denominator > 0 else 0.0
