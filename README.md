@@ -89,6 +89,11 @@ study = Study(
 See [`examples/minimal_study.py`](examples/minimal_study.py) and
 [`examples/phase_1_qc.py`](examples/phase_1_qc.py), with sample data in
 [`examples/data/longitudinal_observations.csv`](examples/data/longitudinal_observations.csv).
+For a complete report bundle, call `run_phase1_audit(...)` or run
+[`examples/public_dog_phase1_audit.py`](examples/public_dog_phase1_audit.py). The audit writes its
+configuration, input fingerprint, QC findings, readiness tables, summary, and overview figure in
+one operation. Optional plans add held-out multivariate detection or randomized treatment
+inference without changing the underlying study.
 The [`examples/rapamycin_phase_1_qc.py`](examples/rapamycin_phase_1_qc.py) example demonstrates
 staggered dosing anchors and balanced treatment batches.
 The [`examples/public_gse131754_rapamycin.py`](examples/public_gse131754_rapamycin.py) workflow

@@ -11,6 +11,7 @@ dist/
 htmlcov/
 site/
 examples/data/cache/
+artifacts/
 .DS_Store
 .idea/
 .vscode/

@@ -13,9 +13,11 @@ The package separates validated data contracts from estimation algorithms:
    multimodal visits.
 6. `treatment_effect` uses out-of-fold control calibration and randomized-label inference to
    estimate longitudinal group effects.
-7. `fusion` converts modality-specific evidence into an uncertain joint estimate.
-8. `state` tracks latent biological state through time.
-9. `combinations` estimates interaction effects for multi-intervention experiments.
+7. `audit` orchestrates Phase 1 checks and inference into a reproducible human- and
+   machine-readable report bundle.
+8. `fusion` converts modality-specific evidence into an uncertain joint estimate.
+9. `state` tracks latent biological state through time.
+10. `combinations` estimates interaction effects for multi-intervention experiments.
 
 All estimators follow `fit`/`predict`-style protocols and return typed results. Implementations
 should remain assay-neutral; modality adapters can be added separately.

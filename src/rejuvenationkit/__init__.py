@@ -1,5 +1,13 @@
 """Uncertainty-aware analysis primitives for longitudinal rejuvenation studies."""
 
+from rejuvenationkit.audit import (
+    ChangeDetectionAuditPlan,
+    Phase1AuditConfig,
+    Phase1AuditReport,
+    Phase1AuditRunner,
+    TreatmentAuditPlan,
+    run_phase1_audit,
+)
 from rejuvenationkit.detection import (
     ChangeDetectionConfig,
     ChangeDetectionModel,
@@ -49,6 +57,7 @@ from rejuvenationkit.treatment_effect import (
 __all__ = [
     "AttritionBias",
     "BaselineLongitudinalQC",
+    "ChangeDetectionAuditPlan",
     "ChangeDetectionConfig",
     "ChangeDetectionModel",
     "ChangeDetectionReport",
@@ -64,6 +73,9 @@ __all__ = [
     "MultivariateChangeDetector",
     "Observation",
     "PairedReadiness",
+    "Phase1AuditConfig",
+    "Phase1AuditReport",
+    "Phase1AuditRunner",
     "QCConfig",
     "QCFinding",
     "QCReport",
@@ -79,11 +91,13 @@ __all__ = [
     "Subject",
     "SubjectChangeDetection",
     "SubjectSequentialDetection",
+    "TreatmentAuditPlan",
     "TreatmentEffectConfig",
     "TreatmentEffectReport",
     "VisitCoverage",
     "VisitFeature",
     "VisitRetention",
     "VisitTreatmentEffect",
+    "run_phase1_audit",
 ]
 __version__ = "0.1.0"

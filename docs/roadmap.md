@@ -18,6 +18,8 @@
 - [x] Exercise calibrated thresholds on held-out public longitudinal aging data.
 - [x] Add sequential detection across three or more visits with persistence requirements.
 - [x] Add cross-validated calibration and randomized group-level treatment-effect inference.
+- [x] Package Phase 1 into a reproducible one-command study-audit workflow.
+- [x] Validate the audit workflow against public longitudinal canine data.
 
 ## Phase 2: aging-fusion
 

@@ -11,6 +11,7 @@ nav:
   - DSP visualization: dsp-visualization.md
   - Sequential response detection: sequential-treatment-response.md
   - Randomized treatment effects: randomized-treatment-effects.md
+  - One-command study audit: study-audit.md
   - Public-data example: public-data-example.md
   - Canine public-data example: canine-public-data-example.md
   - Canine multimodal example: canine-multimodal-example.md

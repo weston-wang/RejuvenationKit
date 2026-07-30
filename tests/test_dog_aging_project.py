@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from io import BytesIO
 from pathlib import Path
+from urllib.request import Request
 from zipfile import ZipFile
 
 import pandas as pd
 import pytest
 
+import rejuvenationkit.datasets.dog_aging_project as dap
 from rejuvenationkit.datasets.dog_aging_project import (
     DAP_CHEMISTRY_MEMBER,
     build_multimodal_study,
@@ -16,6 +19,24 @@ from rejuvenationkit.datasets.dog_aging_project import (
     read_chemistry,
     select_visits,
 )
+
+
+def test_download_archive_identifies_client(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[Request] = []
+
+    def fake_urlopen(request: Request, *, timeout: int) -> BytesIO:
+        observed.append(request)
+        assert timeout == 60
+        return BytesIO(b"public archive")
+
+    monkeypatch.setattr(dap, "urlopen", fake_urlopen)
+    destination = tmp_path / "download.zip"
+
+    assert dap.download_archive(destination).read_bytes() == b"public archive"
+    assert observed[0].get_header("User-agent") == dap.DAP_DOWNLOAD_USER_AGENT
 
 
 def _archive(tmp_path: Path) -> Path:

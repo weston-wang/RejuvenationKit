@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
 from typing import Final, Protocol, cast
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from zipfile import ZipFile
 
 import pandas as pd
@@ -21,6 +21,9 @@ DAP_CHEMISTRY_MEMBER: Final = (
     "baseline_phenotype_datasets/DAP_2024_SamplesResults_ChemistryPanel_analyzed.csv"
 )
 DAP_METABOLOMICS_MEMBER: Final = "baseline_phenotype_datasets/Precision_techAdjustedData"
+DAP_DOWNLOAD_USER_AGENT: Final = (
+    "RejuvenationKit/0.1 (+https://github.com/weston-wang/RejuvenationKit)"
+)
 _NORMALIZED_FIRST_VISIT = datetime(2000, 1, 1, tzinfo=UTC)
 _VISIT_PATTERN = "precision_"
 
@@ -37,7 +40,11 @@ def download_archive(destination: Path, *, overwrite: bool = False) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(f"{destination.suffix}.part")
     try:
-        with urlopen(DAP_ARCHIVE_URL, timeout=60) as response:
+        request = Request(
+            DAP_ARCHIVE_URL,
+            headers={"User-Agent": DAP_DOWNLOAD_USER_AGENT},
+        )
+        with urlopen(request, timeout=60) as response:
             with temporary.open("wb") as output:
                 shutil.copyfileobj(response, output)
         temporary.replace(destination)

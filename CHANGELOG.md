@@ -7,6 +7,10 @@ Keep a Changelog format.
 
 ### Added
 
+- A one-command Phase 1 study audit with canonical input and artifact hashes, standardized
+  CSV/JSON/Markdown outputs, overview and DSP visualizations, optional held-out detection and
+  randomized inference, and public canine validation.
+- An explicit RejuvenationKit client identity for reliable public Harvard Dataverse downloads.
 - Out-of-fold control calibration, randomized multivariate treatment-effect tests, bootstrap
   channel intervals, and a synthetic canine rapamycin example completing the Phase 1 roadmap.
 - Configurable Phase 1 QC for values, units, required-feature missingness, temporal ordering,
