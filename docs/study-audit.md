@@ -90,10 +90,11 @@ external canine data.
 
 ## Reproducibility and interpretation
 
-The JSON report contains the complete audit configuration, study metadata, and a canonical
-SHA-256 fingerprint of the validated input model. The separate manifest records byte sizes and
-SHA-256 digests for every other artifact. The input fingerprint detects changes to subjects,
-observations, ordering, or metadata; it is not a substitute for archiving the source dataset.
+The JSON report contains the report-schema version, RejuvenationKit version, complete audit
+configuration, study metadata, and a canonical SHA-256 fingerprint of the validated input model.
+The separate manifest records the versions plus byte sizes and SHA-256 digests for every other
+artifact. The input fingerprint detects changes to subjects, observations, ordering, or metadata;
+it is not a substitute for archiving the source dataset.
 
 A `PASS` means only that the configured QC checks found no errors. Warnings, analysis readiness,
 attrition, study design, endpoint definitions, and the prespecified statistical analysis plan

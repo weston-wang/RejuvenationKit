@@ -127,8 +127,12 @@ def test_one_command_audit_writes_complete_observational_bundle(tmp_path: Path) 
     assert "makes no treatment-effect claim" in report.summary_markdown()
     payload = json.loads((tmp_path / "audit.json").read_text())
     assert payload["study_id"] == source.study_id
+    assert payload["schema_version"] == "1"
+    assert payload["software_version"]
     assert (tmp_path / "findings.csv").read_text().startswith("code,severity,message")
     manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["schema_version"] == "1"
+    assert manifest["software_version"] == report.software_version
     assert len(manifest["artifacts"]) == len(report.artifacts) - 1
     for artifact in manifest["artifacts"]:
         path = tmp_path / artifact["path"]

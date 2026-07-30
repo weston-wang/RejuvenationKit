@@ -2,14 +2,69 @@
 
 [![CI](https://github.com/weston-wang/RejuvenationKit/actions/workflows/ci.yml/badge.svg)](https://github.com/weston-wang/RejuvenationKit/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11–3.13-blue.svg)](pyproject.toml)
 
-RejuvenationKit is a planned Python SDK for reproducible, uncertainty-aware analysis of
-longitudinal rejuvenation studies. It will sit above established assay-specific pipelines and
-help researchers answer a systems-level question: **what changed, how confidently, and for how
-long?**
+RejuvenationKit is a typed Python toolkit for auditing and analyzing longitudinal preclinical
+rejuvenation studies. It sits above established assay-specific pipelines and helps research teams
+answer:
 
-> **Status:** pre-alpha. Phase 1 longitudinal QC is implemented; later phases retain small
-> placeholder interfaces. This project is for research use and is not medical software.
+> **Is this study trustworthy, did the intervention produce a coherent response, when did it
+> appear, and which biological systems drove it?**
+
+Phase 1 is complete and available as an alpha. It includes protocol-aware quality control,
+analysis-readiness profiling, experimental-confounding checks, held-out DSP change detection,
+sequential response monitoring, randomized longitudinal inference, and reproducible report
+bundles.
+
+This project is for research use. It is not medical software and does not produce treatment
+recommendations.
+
+## Who this is for
+
+RejuvenationKit is designed for:
+
+- preclinical gene-therapy and longevity teams comparing constructs, doses, or vector lots;
+- canine-aging and veterinary-trial researchers with repeated visits and heterogeneous endpoints;
+- computational biologists who need a decision layer above RNA-seq, methylation, proteomics,
+  histology, imaging, or clinical-assay pipelines; and
+- collaborators reviewing whether a study is ready to support an efficacy claim.
+
+It is especially useful when an experiment combines several noisy readouts and risks confusing
+biology with site, plate, assay run, operator, manufacturing lot, or visit timing.
+
+## What it catches
+
+- Missing visits and missing features at expected visits
+- Treatment, cohort, or timepoint confounding with experimental handling
+- Batch shifts, replicate disagreement, distribution anomalies, and attrition bias
+- Weak paired-analysis sample sizes hidden by apparently large enrollment
+- Multichannel responses that emerge gradually or persist across visits
+- Individual responders and dominant evidence modalities
+- Randomized treatment effects calibrated without fitting the null model on treated subjects
+
+## Public canine validation
+
+The one-command audit was run end to end on public Dog Aging Project longitudinal chemistry data:
+
+| Result | Observed |
+|---|---:|
+| Dogs | 972 |
+| Long-form observations | 6,808 |
+| Complete-case retention to the second wave | 75.5% |
+| Held-out complete trajectories scored | 213 |
+| Held-out trajectories crossing the nominal 5% threshold | 11 |
+
+The cohort is observational and contains no rapamycin assignment, so detections are not treatment
+effects. The case demonstrates real ingestion, missingness, retention, held-out calibration,
+reporting, and artifact integrity. See [the DAP audit case study](docs/dap-audit-case-study.md).
+
+## Evaluate it with a study
+
+The most valuable feedback is a de-identified, simulated, or public dataset shaped like a real
+preclinical workflow. Open a
+[study-evaluation request](https://github.com/weston-wang/RejuvenationKit/issues/new?template=study-evaluation.yml)
+with the decision, visit schedule, modalities, and known complications. Do not attach confidential
+or identifiable data to a public issue.
 
 ## Architecture
 
@@ -58,11 +113,11 @@ Milestones and acceptance criteria live in [docs/roadmap.md](docs/roadmap.md).
 ## Quick start
 
 ```bash
+git clone https://github.com/weston-wang/RejuvenationKit.git
+cd RejuvenationKit
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev,docs]"
-pre-commit install
-pytest
+python -m pip install -e ".[visualization]"
 ```
 
 ```python
@@ -86,6 +141,18 @@ study = Study(
 )
 ```
 
+Run `run_phase1_audit(...)` with a `QCConfig` and output directory to create the JSON, CSV,
+Markdown, manifest, and visualization bundle. The complete workflow is documented in
+[the study-audit guide](docs/study-audit.md).
+
+For development:
+
+```bash
+python -m pip install -e ".[dev,docs,visualization]"
+pre-commit install
+pytest
+```
+
 See [`examples/minimal_study.py`](examples/minimal_study.py) and
 [`examples/phase_1_qc.py`](examples/phase_1_qc.py), with sample data in
 [`examples/data/longitudinal_observations.csv`](examples/data/longitudinal_observations.csv).
@@ -94,6 +161,7 @@ For a complete report bundle, call `run_phase1_audit(...)` or run
 configuration, input fingerprint, QC findings, readiness tables, summary, and overview figure in
 one operation. Optional plans add held-out multivariate detection or randomized treatment
 inference without changing the underlying study.
+
 The [`examples/rapamycin_phase_1_qc.py`](examples/rapamycin_phase_1_qc.py) example demonstrates
 staggered dosing anchors and balanced treatment batches.
 The [`examples/public_gse131754_rapamycin.py`](examples/public_gse131754_rapamycin.py) workflow

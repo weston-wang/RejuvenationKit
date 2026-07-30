@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from hashlib import sha256
 from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -88,6 +89,8 @@ class Phase1AuditReport(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    schema_version: str = "1"
+    software_version: str
     study_id: str
     input_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     study_metadata: dict[str, str | int | float | bool]
@@ -120,6 +123,7 @@ class Phase1AuditReport(BaseModel):
             f"- Observations: {int(self.qc.metrics.get('observations', 0)):,}",
             f"- Features: {int(self.qc.metrics.get('features', 0)):,}",
             f"- Expected visits: {int(self.qc.metrics.get('expected_visits', 0)):,}",
+            f"- RejuvenationKit version: {self.software_version}",
             "",
             "## Findings",
             "",
@@ -272,6 +276,7 @@ class Phase1AuditRunner:
         if self.config.include_visualizations:
             artifact_names.append("audit_overview.png")
         report = Phase1AuditReport(
+            software_version=_software_version(),
             study_id=study.study_id,
             input_sha256=_study_fingerprint(study),
             study_metadata=study.metadata,
@@ -425,6 +430,13 @@ def _study_fingerprint(study: Study) -> str:
     return sha256(payload).hexdigest()
 
 
+def _software_version() -> str:
+    try:
+        return version("rejuvenationkit")
+    except PackageNotFoundError:
+        return "0+uninstalled"
+
+
 def _write_manifest(report: Phase1AuditReport, output_dir: Path) -> None:
     files = sorted(
         name
@@ -432,6 +444,8 @@ def _write_manifest(report: Phase1AuditReport, output_dir: Path) -> None:
         if name != "manifest.json" and (output_dir / name).is_file()
     )
     manifest = {
+        "schema_version": report.schema_version,
+        "software_version": report.software_version,
         "study_id": report.study_id,
         "input_sha256": report.input_sha256,
         "artifacts": [

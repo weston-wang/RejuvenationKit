@@ -5,6 +5,8 @@ Keep a Changelog format.
 
 ## [Unreleased]
 
+## [0.2.0a1] - 2026-07-30
+
 ### Added
 
 - A one-command Phase 1 study audit with canonical input and artifact hashes, standardized

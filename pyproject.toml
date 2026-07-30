@@ -4,15 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rejuvenationkit"
-version = "0.1.0"
-description = "Engineering-grade analysis primitives for longitudinal rejuvenation studies."
+version = "0.2.0a1"
+description = "Engineering-grade auditing and analysis for longitudinal rejuvenation studies."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [{ name = "RejuvenationKit contributors" }]
 keywords = ["aging", "longevity", "biomarkers", "bioinformatics", "state-estimation"]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
@@ -28,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2",
   "mypy>=1.16",
   "pandas-stubs>=2.2",
   "pre-commit>=4.2",

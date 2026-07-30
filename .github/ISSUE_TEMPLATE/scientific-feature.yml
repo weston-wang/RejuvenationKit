@@ -23,4 +23,3 @@ body:
       description: Identify synthetic truth or public data and acceptance criteria.
     validations:
       required: true
-

@@ -36,5 +36,5 @@
 ## Phase 4: full SDK
 
 - Add combination-therapy estimands and efficient-design helpers.
-- Add workflow orchestration, adapters, reports, and benchmark datasets.
+- Expand workflow orchestration, assay adapters, reports, and benchmark datasets.
 - Stabilize public APIs and publish versioned documentation.

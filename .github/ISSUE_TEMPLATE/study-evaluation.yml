@@ -1,0 +1,54 @@
+name: Study evaluation
+description: Evaluate whether RejuvenationKit is useful on a real or realistic study
+title: "[Study evaluation]: "
+labels: ["study-evaluation", "needs-validation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for public, simulated, or de-identified study structures.
+        Do not post confidential, proprietary, personal, or identifiable data.
+  - type: textarea
+    id: decision
+    attributes:
+      label: Research decision
+      description: What go/no-go, candidate-selection, or interpretation decision should the analysis support?
+    validations:
+      required: true
+  - type: textarea
+    id: design
+    attributes:
+      label: Study design
+      description: Describe species, cohorts, interventions, randomization, expected visits, and approximate sample size.
+    validations:
+      required: true
+  - type: textarea
+    id: modalities
+    attributes:
+      label: Measurements and modalities
+      description: List bloodwork, omics, imaging, histology, wearable, functional, safety, or event endpoints.
+    validations:
+      required: true
+  - type: textarea
+    id: complications
+    attributes:
+      label: Known complications
+      description: Note missing visits, sites, batches, plates, lots, protocol changes, attrition, or suspected confounding.
+  - type: dropdown
+    id: data
+    attributes:
+      label: Data availability
+      options:
+        - Public dataset
+        - Shareable synthetic or simulated structure
+        - De-identified data available under a separate agreement
+        - Workflow discussion only
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: Useful outcome
+      description: What result would make this evaluation worth the researcher's time?
+    validations:
+      required: true

@@ -23,4 +23,3 @@ body:
       label: Version
     validations:
       required: true
-

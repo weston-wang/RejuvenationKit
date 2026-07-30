@@ -5,7 +5,7 @@ RejuvenationKit welcomes small, testable contributions grounded in a real resear
 ## Development
 
 1. Use Python 3.11 or newer.
-2. Install `python -m pip install -e ".[dev,docs]"`.
+2. Install `python -m pip install -e ".[dev,docs,visualization]"`.
 3. Install hooks with `pre-commit install`.
 4. Add or update tests for every behavior change.
 5. Run the local checks listed in the README.
@@ -21,3 +21,13 @@ RejuvenationKit welcomes small, testable contributions grounded in a real resear
 Public APIs require type hints and docstrings. Experimental APIs belong under
 `rejuvenationkit.experimental` until their validation contract is stable.
 
+## Study evaluations
+
+Feedback from realistic workflows is more valuable than broad feature requests. Use the study
+evaluation issue template to describe the research decision, design, modalities, and known
+complications. Public issues must not contain confidential, proprietary, personal, or identifiable
+data.
+
+An evaluation does not require publishing the underlying measurements. A simulated schema,
+de-identified column inventory, or public analogue can still reveal missing data contracts and
+workflow assumptions.
