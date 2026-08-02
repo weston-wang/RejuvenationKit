@@ -16,6 +16,7 @@ nav:
   - Public-data example: public-data-example.md
   - Canine public-data example: canine-public-data-example.md
   - Canine multimodal example: canine-multimodal-example.md
+  - Publishing and citation: publishing.md
   - Roadmap: roadmap.md
 plugins:
   - search

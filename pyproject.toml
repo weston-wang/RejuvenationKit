@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rejuvenationkit"
-version = "0.2.0a1"
+version = "0.2.0a2"
 description = "Engineering-grade auditing and analysis for longitudinal rejuvenation studies."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -48,8 +48,10 @@ visualization = [
 ]
 
 [project.urls]
+Changelog = "https://github.com/weston-wang/RejuvenationKit/blob/main/CHANGELOG.md"
 Documentation = "https://github.com/weston-wang/RejuvenationKit#readme"
 Issues = "https://github.com/weston-wang/RejuvenationKit/issues"
+Releases = "https://github.com/weston-wang/RejuvenationKit/releases"
 Source = "https://github.com/weston-wang/RejuvenationKit"
 
 [tool.hatch.build.targets.wheel]

@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use RejuvenationKit in research, please cite the software release."
+title: "RejuvenationKit"
+type: software
+authors:
+  - family-names: "Wang"
+    given-names: "Weston"
+repository-code: "https://github.com/weston-wang/RejuvenationKit"
+url: "https://github.com/weston-wang/RejuvenationKit"
+license: "Apache-2.0"
+version: "0.2.0a2"
+date-released: "2026-08-02"
+keywords:
+  - aging
+  - longevity
+  - longitudinal data
+  - biomarkers
+  - signal processing
+  - preclinical research

@@ -5,6 +5,14 @@ Keep a Changelog format.
 
 ## [Unreleased]
 
+## [0.2.0a2] - 2026-08-02
+
+### Added
+
+- Citation metadata and a documented scientific-software release process.
+- Trusted Publishing automation for token-free PyPI releases from GitHub.
+- PyPI, changelog, and release-discovery metadata.
+
 ## [0.2.0a1] - 2026-07-30
 
 ### Added

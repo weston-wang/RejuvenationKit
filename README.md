@@ -1,6 +1,7 @@
 # RejuvenationKit
 
 [![CI](https://github.com/weston-wang/RejuvenationKit/actions/workflows/ci.yml/badge.svg)](https://github.com/weston-wang/RejuvenationKit/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/rejuvenationkit.svg)](https://pypi.org/project/rejuvenationkit/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11–3.13-blue.svg)](pyproject.toml)
 
@@ -113,12 +114,13 @@ Milestones and acceptance criteria live in [docs/roadmap.md](docs/roadmap.md).
 ## Quick start
 
 ```bash
-git clone https://github.com/weston-wang/RejuvenationKit.git
-cd RejuvenationKit
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[visualization]"
+python -m pip install "rejuvenationkit[visualization]"
 ```
+
+Until `0.2.0a2` is published to PyPI, install the current source release from GitHub as described
+in [the publishing guide](docs/publishing.md).
 
 ```python
 from datetime import datetime, timezone
@@ -209,3 +211,9 @@ curated assay outputs. No therapy recommendations are produced.
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
+
+## Citation
+
+If RejuvenationKit contributes to research, cite the archived software release used in the
+analysis. Citation metadata are available in [CITATION.cff](CITATION.cff); a DOI will be added
+after Zenodo archives the release.
