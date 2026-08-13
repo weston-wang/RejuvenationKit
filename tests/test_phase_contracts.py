@@ -33,10 +33,9 @@ def test_phase_one_returns_report(study: Study) -> None:
     assert report.metrics["observations"] == 1
 
 
-def test_phase_two_stubs_are_explicit(study: Study) -> None:
+def test_phase_two_reference_estimator_is_operational(study: Study) -> None:
     estimator = PrecisionWeightedFusion()
-    with pytest.raises(NotImplementedError, match="calibration"):
-        estimator.fit(study)
+    estimator.fit(study)
     inputs = (
         ModalityEstimate(
             modality=Modality.CLINICAL,
@@ -45,8 +44,9 @@ def test_phase_two_stubs_are_explicit(study: Study) -> None:
             target="biological_age_delta",
         ),
     )
-    with pytest.raises(NotImplementedError, match="fusion"):
-        estimator.fuse(inputs)
+    result = estimator.fuse(inputs)
+    assert result.estimate == 1.0
+    assert result.fitted_study_id == "study"
 
 
 def test_phase_three_stubs_are_explicit(study: Study) -> None:

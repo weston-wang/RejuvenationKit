@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rejuvenationkit"
-version = "0.2.0a2"
+version = "0.3.0a1"
 description = "Engineering-grade auditing and analysis for longitudinal rejuvenation studies."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -15,6 +15,16 @@ from rejuvenationkit.detection import (
     MultivariateChangeDetector,
     SubjectChangeDetection,
 )
+from rejuvenationkit.fusion import (
+    FusionConfig,
+    FusionModel,
+    FusionResult,
+    LeaveOneModalityOut,
+    MissingModalityPolicy,
+    ModalityCalibration,
+    ModalityEstimate,
+    PrecisionWeightedFusion,
+)
 from rejuvenationkit.profiling import (
     AttritionBias,
     FeatureDistribution,
@@ -68,7 +78,14 @@ __all__ = [
     "FeatureDistribution",
     "FeatureRule",
     "FeatureTreatmentEffect",
+    "FusionConfig",
+    "FusionModel",
+    "FusionResult",
+    "LeaveOneModalityOut",
+    "MissingModalityPolicy",
     "Modality",
+    "ModalityCalibration",
+    "ModalityEstimate",
     "ModalityEvidence",
     "MultivariateChangeDetector",
     "Observation",
@@ -76,6 +93,7 @@ __all__ = [
     "Phase1AuditConfig",
     "Phase1AuditReport",
     "Phase1AuditRunner",
+    "PrecisionWeightedFusion",
     "QCConfig",
     "QCFinding",
     "QCReport",
@@ -100,4 +118,4 @@ __all__ = [
     "VisitTreatmentEffect",
     "run_phase1_audit",
 ]
-__version__ = "0.2.0a2"
+__version__ = "0.3.0a1"

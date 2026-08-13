@@ -23,9 +23,9 @@
 
 ## Phase 2: aging-fusion
 
-- Define calibrated modality estimates and missing-modality behavior.
-- Implement baseline uncertainty-aware fusion.
-- Quantify modality disagreement and leave-one-modality-out sensitivity.
+- [x] Define calibrated modality estimates and missing-modality behavior.
+- [x] Implement baseline uncertainty-aware fusion.
+- [x] Quantify modality disagreement and leave-one-modality-out sensitivity.
 
 ## Phase 3: aging-state
 

@@ -15,7 +15,8 @@ The package separates validated data contracts from estimation algorithms:
    estimate longitudinal group effects.
 7. `audit` orchestrates Phase 1 checks and inference into a reproducible human- and
    machine-readable report bundle.
-8. `fusion` converts modality-specific evidence into an uncertain joint estimate.
+8. `fusion` combines commensurate modality estimates with calibration provenance, random-effects
+   uncertainty, explicit missingness, heterogeneity, and leave-one-modality-out influence.
 9. `state` tracks latent biological state through time.
 10. `combinations` estimates interaction effects for multi-intervention experiments.
 

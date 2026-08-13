@@ -12,10 +12,11 @@ answer:
 > **Is this study trustworthy, did the intervention produce a coherent response, when did it
 > appear, and which biological systems drove it?**
 
-Phase 1 is complete and available as an alpha. It includes protocol-aware quality control,
+Phases 1 and 2 are complete and available as an alpha. Phase 1 includes protocol-aware quality control,
 analysis-readiness profiling, experimental-confounding checks, held-out DSP change detection,
 sequential response monitoring, randomized longitudinal inference, and reproducible report
-bundles.
+bundles. Phase 2 adds calibrated fixed- and random-effects multimodal fusion, explicit
+missing-assay behavior, disagreement metrics, and leave-one-modality-out sensitivity.
 
 This project is for research use. It is not medical software and does not produce treatment
 recommendations.
@@ -102,8 +103,9 @@ return typed result objects rather than unstructured tables.
   retention, paired-analysis readiness, robust outliers, attrition-bias diagnostics, and
   covariance-aware multivariate and sequential change detection, leakage-safe control
   calibration, and randomized longitudinal treatment-effect inference.
-- **Phase 2 — `aging-fusion`:** fuse clocks, omics, pathology, imaging, and clinical
-  biomarkers while preserving modality-level uncertainty and disagreement.
+- **Phase 2 — `aging-fusion` (baseline implemented):** fuse commensurate clocks, omics,
+  pathology, imaging, and clinical estimates while preserving uncertainty, missingness,
+  calibration provenance, disagreement, and modality influence.
 - **Phase 3 — `aging-state`:** longitudinal latent-state estimation, smoothing, change-point
   detection, and forecast validation.
 - **Phase 4 — full SDK:** stable workflows, combination-therapy interaction analysis,
@@ -119,8 +121,8 @@ source .venv/bin/activate
 python -m pip install "rejuvenationkit[visualization]"
 ```
 
-Until `0.2.0a2` is published to PyPI, install the current source release from GitHub as described
-in [the publishing guide](docs/publishing.md).
+Until the first version is published to PyPI, install the current source release from GitHub as
+described in [the publishing guide](docs/publishing.md).
 
 ```python
 from datetime import datetime, timezone
@@ -191,6 +193,9 @@ The [`examples/triad_like_rapamycin_sequential.py`](examples/triad_like_rapamyci
 workflow generates a clearly labeled synthetic 580-dog, seven-visit trial shaped like the public
 TRIAD protocol. It demonstrates responder onset, persistence, transient effects, and
 modality-localized evidence; it contains no DAP treatment outcomes.
+The [`examples/canine_multimodal_fusion.py`](examples/canine_multimodal_fusion.py) workflow
+demonstrates Phase 2 fusion under coherent evidence, a conflicting clinical response, and a
+missing proteomics assay. Its inputs are synthetic and do not imply measured canine efficacy.
 
 ## Contribution workflow
 

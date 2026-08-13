@@ -5,6 +5,16 @@ Keep a Changelog format.
 
 ## [Unreleased]
 
+## [0.3.0a1] - 2026-08-12
+
+### Added
+
+- Phase 2 fixed- and random-effects multimodal fusion with explicit external calibration,
+  missing-modality policies, heterogeneity diagnostics, confidence intervals, and
+  leave-one-modality-out influence analysis.
+- A documented synthetic canine example covering coherent, conflicting, and missing-assay
+  scenarios.
+
 ## [0.2.0a2] - 2026-08-02
 
 ### Added
