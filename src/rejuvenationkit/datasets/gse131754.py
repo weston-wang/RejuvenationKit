@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 from typing import cast
 from urllib.request import urlopen
@@ -13,12 +14,27 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
+from rejuvenationkit.evidence import EffectDirection
+from rejuvenationkit.genomics.schemas import (
+    FeatureNamespace,
+    GenomicFeature,
+    GenomicFeatureType,
+    GenomicMatrix,
+    GenomicMatrixProvenance,
+    GenomicSample,
+    MatrixScale,
+)
+from rejuvenationkit.genomics.signatures import (
+    GeneSignature,
+    SignatureFeature,
+)
 from rejuvenationkit.schemas import Modality, Observation, Study, Subject
 
 GSE131754_URL = (
     "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE131nnn/GSE131754/suppl/"
     "GSE131754_Interventions_assigned_reads.txt.gz"
 )
+GSE131754_SHA256 = "dbd9c37015a17729fc800dfda537b58f64e694af60e4aaeaece748d9d97c7e90"
 _SAMPLE_PATTERN = re.compile(
     r"^(?P<intervention>[A-Z0-9]+)_(?P<age_months>\d+)m_(?P<sex>[FM])_(?P<replicate>\d+)$"
 )
@@ -63,9 +79,15 @@ def parse_sample_name(sample_id: str) -> SampleMetadata:
     )
 
 
-def download_counts(destination: Path, *, overwrite: bool = False) -> Path:
-    """Download the processed count matrix, reusing a local cache by default."""
+def download_counts(
+    destination: Path,
+    *,
+    overwrite: bool = False,
+    expected_sha256: str = GSE131754_SHA256,
+) -> Path:
+    """Download the pinned count matrix and verify cached or new bytes."""
     if destination.exists() and not overwrite:
+        _verify_sha256(destination, expected_sha256)
         return destination
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(f"{destination.suffix}.part")
@@ -73,6 +95,7 @@ def download_counts(destination: Path, *, overwrite: bool = False) -> Path:
         with urlopen(GSE131754_URL, timeout=60) as response:
             with temporary.open("wb") as output:
                 shutil.copyfileobj(response, output)
+        _verify_sha256(temporary, expected_sha256)
         temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)
@@ -209,3 +232,170 @@ def build_study(
             "design": "cross-sectional",
         },
     )
+
+
+def build_genomic_matrix(
+    counts: pd.DataFrame,
+    *,
+    source_uri: str = GSE131754_URL,
+    source_checksum: str | None = None,
+) -> GenomicMatrix:
+    """Convert the complete gene-by-sample counts into a typed genomic matrix."""
+    if counts.empty:
+        raise ValueError("count matrix is empty")
+    if not counts.index.is_unique or counts.columns.duplicated().any():
+        raise ValueError("gene and sample identifiers must be unique")
+    metadata = tuple(parse_sample_name(str(column)) for column in counts.columns)
+    samples = tuple(
+        GenomicSample(
+            sample_id=item.sample_id,
+            subject_id=item.sample_id,
+            tissue="liver",
+            species_taxon_id=10090,
+            cohort=(
+                "rapamycin"
+                if item.is_rapamycin
+                else "control"
+                if item.is_control
+                else item.intervention_code.lower()
+            ),
+            assay_id="polyA RNA-seq assigned reads",
+            attributes={
+                "age_months": item.age_months,
+                "sex": item.sex,
+                "replicate": item.replicate,
+                "intervention_code": item.intervention_code,
+            },
+        )
+        for item in metadata
+    )
+    features = tuple(
+        GenomicFeature(
+            feature_id=str(identifier),
+            feature_type=GenomicFeatureType.GENE,
+            namespace=FeatureNamespace.ENSEMBL,
+            genome_assembly="GRCm38",
+        )
+        for identifier in counts.index
+    )
+    values = counts.to_numpy(dtype=float).T
+    return GenomicMatrix(
+        values=values,
+        samples=samples,
+        features=features,
+        scale=MatrixScale.RAW_COUNTS,
+        provenance=GenomicMatrixProvenance(
+            source_id="GSE131754:Interventions_assigned_reads",
+            source_checksum=source_checksum,
+            preprocessing=(
+                "STAR 2.5.2b alignment to mm10/GRCm38",
+                "featureCounts 1.5 assigned reads",
+            ),
+            software_versions={
+                "STAR": "2.5.2b",
+                "featureCounts": "1.5",
+            },
+            reference_resource_ids=(source_uri,),
+        ),
+    )
+
+
+def rapamycin_mechanism_signatures() -> tuple[GeneSignature, ...]:
+    """Return fixed mouse-liver mechanism panels for engineering validation.
+
+    These small, inspectable panels use canonical genes from biological themes
+    reported with GSE131754: mTOR/lipid metabolism, autophagy, NRF2 response,
+    and immune signaling. They are prespecified software fixtures, not validated
+    biological-age clocks or a reproduction of the publication's full models.
+    All weights are oriented so a negative score is the hypothesized favorable
+    rapamycin direction.
+    """
+
+    def build_signature(
+        signature_id: str,
+        name: str,
+        identifiers: tuple[str, ...],
+        *,
+        weight: float,
+    ) -> GeneSignature:
+        return GeneSignature(
+            signature_id=signature_id,
+            version="1.0",
+            name=name,
+            features=tuple(
+                SignatureFeature(feature_id=identifier, weight=weight) for identifier in identifiers
+            ),
+            namespace=FeatureNamespace.ENSEMBL,
+            species_taxon_id=10090,
+            tissue="liver",
+            target_name=f"{signature_id}_response",
+            target_unit="mean_signed_log2_cpm",
+            direction=EffectDirection.LOWER_IS_BETTER,
+            resource_id=(
+                "RejuvenationKit:GSE131754-canonical-mechanism-panels-v1;"
+                "embedded-Ensembl-GRCm38-ID-map-v1"
+            ),
+            allowed_scales=(MatrixScale.LOG_CPM,),
+        )
+
+    return (
+        build_signature(
+            "mtorc1-lipogenesis",
+            "mTORC1 and hepatic lipogenesis",
+            (
+                "ENSMUSG00000028991",  # Mtor
+                "ENSMUSG00000025583",  # Rptor
+                "ENSMUSG00000020538",  # Srebf1
+                "ENSMUSG00000025153",  # Fasn
+                "ENSMUSG00000020532",  # Acaca
+                "ENSMUSG00000037071",  # Scd1
+            ),
+            weight=1,
+        ),
+        build_signature(
+            "autophagy-lysosome",
+            "Autophagy and lysosomal program",
+            (
+                "ENSMUSG00000023990",  # Tfeb
+                "ENSMUSG00000038160",  # Atg5
+                "ENSMUSG00000030314",  # Atg7
+                "ENSMUSG00000035086",  # Becn1
+                "ENSMUSG00000031812",  # Map1lc3b
+                "ENSMUSG00000015837",  # Sqstm1
+            ),
+            weight=-1,
+        ),
+        build_signature(
+            "nrf2-cytoprotection",
+            "NRF2 cytoprotective response",
+            (
+                "ENSMUSG00000015839",  # Nfe2l2
+                "ENSMUSG00000003849",  # Nqo1
+                "ENSMUSG00000032350",  # Gclc
+                "ENSMUSG00000028124",  # Gclm
+                "ENSMUSG00000005413",  # Hmox1
+            ),
+            weight=-1,
+        ),
+        build_signature(
+            "inflammatory-response",
+            "Inflammatory and interferon response (putative safety signal)",
+            (
+                "ENSMUSG00000028163",  # Nfkb1
+                "ENSMUSG00000026104",  # Stat1
+                "ENSMUSG00000025746",  # Il6
+                "ENSMUSG00000024401",  # Tnf
+                "ENSMUSG00000035385",  # Ccl2
+                "ENSMUSG00000034855",  # Cxcl10
+            ),
+            weight=1,
+        ),
+    )
+
+
+def _verify_sha256(path: Path, expected: str) -> None:
+    observed = sha256(path.read_bytes()).hexdigest()
+    if observed != expected:
+        raise ValueError(
+            f"GSE131754 checksum mismatch for {path}: expected {expected}, observed {observed}"
+        )

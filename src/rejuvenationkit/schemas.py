@@ -12,6 +12,7 @@ class Modality(StrEnum):
     """Supported high-level measurement modalities."""
 
     CLINICAL = "clinical"
+    GENOMICS = "genomics"
     HISTOLOGY = "histology"
     IMAGING = "imaging"
     METABOLOMICS = "metabolomics"

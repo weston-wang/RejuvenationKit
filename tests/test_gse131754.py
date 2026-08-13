@@ -1,5 +1,6 @@
 import gzip
 import io
+from hashlib import sha256
 from pathlib import Path
 
 import pandas as pd
@@ -7,13 +8,16 @@ import pytest
 
 from rejuvenationkit.datasets import gse131754
 from rejuvenationkit.datasets.gse131754 import (
+    build_genomic_matrix,
     build_study,
     descriptive_log2_fold_changes,
     download_counts,
     parse_sample_name,
+    rapamycin_mechanism_signatures,
     read_counts,
     select_rapamycin_and_controls,
 )
+from rejuvenationkit.genomics import MatrixScale
 
 
 def matrix() -> pd.DataFrame:
@@ -93,6 +97,31 @@ def test_build_study_maps_public_metadata() -> None:
         build_study(selected, gene_ids=("missing",))
 
 
+def test_build_genomic_matrix_and_prespecified_mechanism_panels() -> None:
+    selected = select_rapamycin_and_controls(matrix())
+    genomic = build_genomic_matrix(selected, source_uri="fixture", source_checksum="a" * 64)
+
+    assert genomic.shape == (4, 2)
+    assert genomic.sample_ids[0] == "RAP_6m_F_1"
+    assert genomic.samples[0].cohort == "rapamycin"
+    assert genomic.samples[0].species_taxon_id == 10090
+    assert genomic.features[0].genome_assembly == "GRCm38"
+    assert genomic.provenance.source_checksum == "a" * 64
+    assert genomic.provenance.reference_resource_ids == ("fixture",)
+
+    signatures = rapamycin_mechanism_signatures()
+    assert {item.signature_id for item in signatures} == {
+        "mtorc1-lipogenesis",
+        "autophagy-lysosome",
+        "nrf2-cytoprotection",
+        "inflammatory-response",
+    }
+    assert all(item.species_taxon_id == 10090 for item in signatures)
+    assert all(item.target_unit == "mean_signed_log2_cpm" for item in signatures)
+    assert len({item.target_name for item in signatures}) == 4
+    assert all(item.allowed_scales == (MatrixScale.LOG_CPM,) for item in signatures)
+
+
 def test_descriptive_log2_fold_changes() -> None:
     selected = select_rapamycin_and_controls(matrix())
     result = descriptive_log2_fold_changes(selected)
@@ -129,7 +158,11 @@ def test_download_counts_uses_cache_and_atomic_write(
 
     monkeypatch.setattr(gse131754, "urlopen", fake_urlopen)
     destination = tmp_path / "counts.tsv.gz"
-    assert download_counts(destination) == destination
+    expected = sha256(payload).hexdigest()
+    assert download_counts(destination, expected_sha256=expected) == destination
     assert destination.read_bytes() == payload
-    assert download_counts(destination) == destination
+    assert download_counts(destination, expected_sha256=expected) == destination
     assert calls == 1
+
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        download_counts(destination, expected_sha256="0" * 64)

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rejuvenationkit"
-version = "0.3.0a1"
+version = "0.3.0a2"
 description = "Engineering-grade auditing and analysis for longitudinal rejuvenation studies."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,7 @@ dependencies = [
   "numpy>=1.26,<2.3",
   "pandas>=2.2",
   "pydantic>=2.8",
+  "scipy>=1.14,<2",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +43,19 @@ docs = [
 ]
 public-data = [
   "pyreadr>=0.5",
+]
+genomics = [
+  "bioframe>=0.8,<1",
+  "scikit-learn>=1.5,<2",
+]
+hts = [
+  "pysam>=0.24,<1",
+]
+genome-hf = [
+  "huggingface-hub>=0.27,<2",
+  "safetensors>=0.5,<1",
+  "torch>=2.4,<3",
+  "transformers>=4.48,<6",
 ]
 visualization = [
   "matplotlib>=3.9",
@@ -84,3 +98,7 @@ ignore = ["D203", "D213"]
 python_version = "3.11"
 strict = true
 packages = ["rejuvenationkit"]
+
+[[tool.mypy.overrides]]
+module = ["scipy", "scipy.*"]
+ignore_missing_imports = true

@@ -22,7 +22,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[dev,visualization]"
+      - run: python -m pip install -e ".[dev,genomics,hts,visualization]"
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy

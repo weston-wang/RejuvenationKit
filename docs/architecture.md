@@ -17,11 +17,21 @@ The package separates validated data contracts from estimation algorithms:
    machine-readable report bundle.
 8. `fusion` combines commensurate modality estimates with calibration provenance, random-effects
    uncertainty, explicit missingness, heterogeneity, and leave-one-modality-out influence.
-9. `state` tracks latent biological state through time.
-10. `combinations` estimates interaction effects for multi-intervention experiments.
+9. `evidence` combines multiple correlated clocks, signatures, tissues, or assays through
+   evidence-level generalized least squares and hierarchical modality summaries.
+10. `genomics` keeps high-dimensional dense/sparse measurements aligned to sample, feature, scale,
+    species, tissue, assembly, and provenance metadata; it constructs signatures or held-out target
+    predictions before fusion.
+11. `state` tracks latent biological state through time.
+12. `combinations` estimates interaction effects for multi-intervention experiments.
 
 All estimators follow `fit`/`predict`-style protocols and return typed results. Implementations
 should remain assay-neutral; modality adapters can be added separately.
+
+Genome-scale matrices are deliberately separate from scalar `Observation` rows. They remain in
+matrix form through assay validation, signature scoring, sequence embedding, and held-out target
+calibration. Only calibrated scalar targets with subject-level uncertainty cross into the evidence
+fusion layer.
 
 Expected visits are QC policies rather than stored observations. This keeps recorded facts in
 `Study` separate from protocol expectations in `QCConfig` and allows the same study to be checked

@@ -15,6 +15,20 @@ from rejuvenationkit.detection import (
     MultivariateChangeDetector,
     SubjectChangeDetection,
 )
+from rejuvenationkit.evidence import (
+    EffectDirection,
+    Estimand,
+    EvidenceCovariance,
+    EvidenceEstimate,
+    EvidenceFusionConfig,
+    EvidenceFusionResult,
+    EvidenceWeightConstraint,
+    GeneralizedLeastSquaresFusion,
+    HierarchicalEvidenceFusion,
+    HierarchicalFusionResult,
+    LeaveOneEvidenceModalityOut,
+    LeaveOneEvidenceOut,
+)
 from rejuvenationkit.fusion import (
     FusionConfig,
     FusionModel,
@@ -72,6 +86,13 @@ __all__ = [
     "ChangeDetectionModel",
     "ChangeDetectionReport",
     "CrossValidatedSubjectScore",
+    "EffectDirection",
+    "Estimand",
+    "EvidenceCovariance",
+    "EvidenceEstimate",
+    "EvidenceFusionConfig",
+    "EvidenceFusionResult",
+    "EvidenceWeightConstraint",
     "ExpectedVisit",
     "ExperimentalFactor",
     "FactorSource",
@@ -81,6 +102,11 @@ __all__ = [
     "FusionConfig",
     "FusionModel",
     "FusionResult",
+    "GeneralizedLeastSquaresFusion",
+    "HierarchicalEvidenceFusion",
+    "HierarchicalFusionResult",
+    "LeaveOneEvidenceModalityOut",
+    "LeaveOneEvidenceOut",
     "LeaveOneModalityOut",
     "MissingModalityPolicy",
     "Modality",
@@ -118,4 +144,4 @@ __all__ = [
     "VisitTreatmentEffect",
     "run_phase1_audit",
 ]
-__version__ = "0.3.0a1"
+__version__ = "0.3.0a2"

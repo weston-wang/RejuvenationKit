@@ -5,6 +5,26 @@ Keep a Changelog format.
 
 ## [Unreleased]
 
+## [0.3.0a2] - 2026-08-13
+
+### Added
+
+- Evidence-level estimands and provenance, covariance-aware generalized least-squares fusion,
+  numerical conditioning diagnostics, and evidence/modality influence analysis.
+- Hierarchical fusion that combines correlated clocks or signatures within modalities before
+  balancing evidence across modalities.
+- Dense and sparse genome-scale data contracts with expression, methylation, AnnData-like,
+  VCF/BCF, and genomic-interval adapters.
+- Prespecified genomic signature scoring, subject-clustered contrast uncertainty, correlation-aware
+  feature-effect aggregation, and leakage-aware genomic target calibration.
+- An optional, immutable-revision Hugging Face sequence-embedding interface with explicit model
+  license, layer, pooling, strand, chunking, and no-silent-truncation policies.
+- A synthetic canine workflow comparing naive, covariance-aware, and hierarchical genomic fusion.
+- A public GSE131754 genome-scale benchmark with joint subject-bootstrap covariance, explicit
+  covariance shrinkage, pathway-specific estimands, and age/sex/dose separation.
+- Versioned cross-species signature translation with explicit one-to-many policies and retained
+  feature-weight diagnostics.
+
 ## [0.3.0a1] - 2026-08-12
 
 ### Added

@@ -12,11 +12,13 @@ answer:
 > **Is this study trustworthy, did the intervention produce a coherent response, when did it
 > appear, and which biological systems drove it?**
 
-Phases 1 and 2 are complete and available as an alpha. Phase 1 includes protocol-aware quality control,
-analysis-readiness profiling, experimental-confounding checks, held-out DSP change detection,
-sequential response monitoring, randomized longitudinal inference, and reproducible report
-bundles. Phase 2 adds calibrated fixed- and random-effects multimodal fusion, explicit
-missing-assay behavior, disagreement metrics, and leave-one-modality-out sensitivity.
+Phase 1 and the expanded Phase 2 baseline are available as an alpha. Phase 1 includes
+protocol-aware quality control, analysis-readiness profiling, experimental-confounding checks,
+held-out DSP change detection, sequential response monitoring, randomized longitudinal inference,
+and reproducible report bundles. Phase 2 adds calibrated fixed- and random-effects multimodal
+fusion, evidence-level covariance and hierarchical fusion, dense/sparse genome-scale matrices,
+genomic signatures, leakage-aware target calibration, and optional provenance-tracked Hugging Face
+sequence embeddings.
 
 This project is for research use. It is not medical software and does not produce treatment
 recommendations.
@@ -42,6 +44,8 @@ biology with site, plate, assay run, operator, manufacturing lot, or visit timin
 - Weak paired-analysis sample sizes hidden by apparently large enrollment
 - Multichannel responses that emerge gradually or persist across visits
 - Individual responders and dominant evidence modalities
+- False precision from correlated clocks or several signatures built from the same omics data
+- Species, tissue, feature-namespace, and training/evaluation-domain mismatches in genomic models
 - Randomized treatment effects calibrated without fitting the null model on treated subjects
 
 ## Public canine validation
@@ -103,9 +107,12 @@ return typed result objects rather than unstructured tables.
   retention, paired-analysis readiness, robust outliers, attrition-bias diagnostics, and
   covariance-aware multivariate and sequential change detection, leakage-safe control
   calibration, and randomized longitudinal treatment-effect inference.
-- **Phase 2 — `aging-fusion` (baseline implemented):** fuse commensurate clocks, omics,
-  pathology, imaging, and clinical estimates while preserving uncertainty, missingness,
-  calibration provenance, disagreement, and modality influence.
+- **Phase 2 — `aging-fusion` (expanded baseline implemented):** fuse commensurate clocks, omics,
+  pathology, imaging, and clinical estimates while preserving uncertainty, covariance,
+  missingness, calibration provenance, disagreement, evidence/modality influence, and genomic
+  domain metadata. Public external genomic benchmarking and cross-species ortholog mapping remain
+  domain metadata, a public external genomic benchmark, and explicit cross-species ortholog
+  mapping.
 - **Phase 3 — `aging-state`:** longitudinal latent-state estimation, smoothing, change-point
   detection, and forecast validation.
 - **Phase 4 — full SDK:** stable workflows, combination-therapy interaction analysis,
@@ -119,6 +126,14 @@ Milestones and acceptance criteria live in [docs/roadmap.md](docs/roadmap.md).
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install "rejuvenationkit[visualization]"
+```
+
+For genome-scale matrices, target calibration, VCF/BCF, and optional sequence models:
+
+```bash
+python -m pip install "rejuvenationkit[genomics,hts]"
+# Large model dependencies are deliberately separate:
+python -m pip install "rejuvenationkit[genome-hf]"
 ```
 
 Until the first version is published to PyPI, install the current source release from GitHub as
@@ -152,7 +167,7 @@ Markdown, manifest, and visualization bundle. The complete workflow is documente
 For development:
 
 ```bash
-python -m pip install -e ".[dev,docs,visualization]"
+python -m pip install -e ".[dev,docs,genomics,hts,visualization]"
 pre-commit install
 pytest
 ```
@@ -196,6 +211,19 @@ modality-localized evidence; it contains no DAP treatment outcomes.
 The [`examples/canine_multimodal_fusion.py`](examples/canine_multimodal_fusion.py) workflow
 demonstrates Phase 2 fusion under coherent evidence, a conflicting clinical response, and a
 missing proteomics assay. Its inputs are synthetic and do not imply measured canine efficacy.
+The
+[`examples/synthetic_canine_genomic_fusion.py`](examples/synthetic_canine_genomic_fusion.py)
+workflow scores correlated canine transcriptomic signatures, propagates subject-level uncertainty,
+compares naive and covariance-aware inference, then balances genomic and clinical evidence
+hierarchically. A differently defined inflammatory safety signal stays outside the efficacy
+fusion. All values are synthetic.
+The
+[`examples/public_gse131754_genomic_fusion.py`](examples/public_gse131754_genomic_fusion.py)
+workflow downloads a real 43,629-gene mouse-liver rapamycin dataset and validates joint genomic
+signature covariance, shrinkage, and pathway-specific estimands across age/sex/dose strata. It
+keeps the pathway vector intact instead of manufacturing one uncalibrated efficacy score. The
+panels are engineering fixtures, not validated biological-age clocks; see the
+[public benchmark report](docs/gse131754-genomic-benchmark.md).
 
 ## Contribution workflow
 

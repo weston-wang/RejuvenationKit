@@ -26,6 +26,18 @@
 - [x] Define calibrated modality estimates and missing-modality behavior.
 - [x] Implement baseline uncertainty-aware fusion.
 - [x] Quantify modality disagreement and leave-one-modality-out sensitivity.
+- [x] Add evidence-level estimands, provenance, and multiple estimates per modality.
+- [x] Implement covariance-aware generalized least-squares fusion and conditioning diagnostics.
+- [x] Add evidence- and modality-level influence plus hierarchical modality balancing.
+- [x] Define dense/sparse genome-scale sample and feature matrix contracts.
+- [x] Add expression, methylation, AnnData-like, VCF/BCF, and genomic-interval adapters.
+- [x] Add prespecified signature scoring, subject-clustered uncertainty, and feature-effect
+  aggregation.
+- [x] Add leakage-aware genomic target calibration with domain and overlap checks.
+- [x] Add a revision-pinned, optional Hugging Face genome-embedding interface.
+- [x] Demonstrate correlated genomic and clinical evidence in a synthetic canine workflow.
+- [x] Validate signature and covariance inference on a prespecified external public benchmark.
+- [x] Add a versioned, ambiguity-reporting cross-species ortholog adapter.
 
 ## Phase 3: aging-state
 

@@ -113,8 +113,9 @@ The toolkit reports the statistic rather than converting it into a pass/fail jud
 - Inputs must estimate one target on one meaningful scale.
 - Standard errors must include the important uncertainty from each upstream pipeline.
 - The baseline treats modality estimates as independent. Correlated clocks or assays can make the
-  fused standard error too small; covariance-aware fusion requires an externally estimated
-  cross-modality covariance matrix and remains future work.
+  fused standard error too small. Use the evidence-level
+  [covariance-aware fusion](covariance-aware-fusion.md) API with an externally estimated covariance
+  matrix when dependence is material.
 - DerSimonian–Laird variance is a transparent baseline, not an optimal estimator with only two or
   three modalities.
 - Calibration and fusion must not reuse evaluation outcomes in ways that leak treatment effects.

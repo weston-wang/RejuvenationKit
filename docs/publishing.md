@@ -39,13 +39,14 @@ the README and package metadata.
 The publishing workflow rejects a GitHub release whose tag does not match the version declared in
 `pyproject.toml`. PyPI versions are immutable: never reuse a version after it has been uploaded.
 
-## Installing an unpublished source release
+## Installing an unpublished source snapshot
 
-Before a version appears on PyPI, install it directly from its Git tag:
+Before the next version is tagged or appears on PyPI, install the current branch directly. Pin the
+resulting commit SHA in a reproducible study environment:
 
 ```bash
 python -m pip install \
-  "rejuvenationkit[visualization] @ git+https://github.com/weston-wang/RejuvenationKit.git@v0.2.0a1"
+  "rejuvenationkit[visualization] @ git+https://github.com/weston-wang/RejuvenationKit.git@main"
 ```
 
 ## Citation
