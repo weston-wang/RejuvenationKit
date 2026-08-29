@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import json
+from hashlib import sha256
 from math import isfinite
 from typing import Self
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from rejuvenationkit.genomics.schemas import FeatureNamespace, GenomicFeatureType
+from rejuvenationkit.genomics.schemas import (
+    FeatureNamespace,
+    GenomicFeatureType,
+    validate_feature_domain_compatibility,
+)
 from rejuvenationkit.schemas import Modality
 
 
@@ -35,7 +41,21 @@ class FeatureEffect(BaseModel):
 
     @model_validator(mode="after")
     def validate_finite(self) -> Self:
-        """Reject invalid numerical outputs from upstream feature models."""
+        """Reject invalid domains or numerical outputs from upstream models."""
+        for field_name, value in (
+            ("feature_id", self.feature_id),
+            ("contrast", self.contrast),
+            ("effect_unit", self.effect_unit),
+            ("tissue", self.tissue),
+            ("provenance_id", self.provenance_id),
+        ):
+            if value != value.strip() or not value:
+                raise ValueError(f"{field_name} must be nonempty without surrounding whitespace")
+        validate_feature_domain_compatibility(
+            feature_type=self.feature_type,
+            namespace=self.namespace,
+            genome_assembly=self.genome_assembly,
+        )
         values = (
             self.effect,
             self.standard_error,
@@ -46,6 +66,77 @@ class FeatureEffect(BaseModel):
         if any(value is not None and not isfinite(value) for value in values):
             raise ValueError("feature-effect numerical values must be finite")
         return self
+
+
+class FeatureEffectBatch(BaseModel):
+    """Feature effects plus the independent-subject estimand and model context."""
+
+    model_config = ConfigDict(frozen=True)
+
+    effects: tuple[FeatureEffect, ...]
+    contrast: str = Field(min_length=1)
+    estimand_population: str = Field(min_length=1)
+    time_contrast: str = Field(min_length=1)
+    treated_subjects: int = Field(gt=0)
+    control_subjects: int = Field(gt=0)
+    independent_subject_definition: str = Field(min_length=1)
+    design_formula: str = Field(min_length=1)
+    covariates: tuple[str, ...] = ()
+    normalization_method: str = Field(min_length=1)
+    inference_method: str = Field(min_length=1)
+    inference_version: str = Field(min_length=1)
+    tested_feature_ids: tuple[str, ...]
+    multiple_testing_method: str = Field(min_length=1)
+    effect_provenance_id: str = Field(min_length=1)
+    provenance_id: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_batch(self) -> Self:
+        """Require one coherent contrast and an explicit tested universe."""
+        if not self.effects:
+            raise ValueError("feature-effect batch cannot be empty")
+        feature_ids = [item.feature_id for item in self.effects]
+        if len(set(feature_ids)) != len(feature_ids):
+            raise ValueError("feature-effect batch identifiers must be unique")
+        if not self.tested_feature_ids or len(set(self.tested_feature_ids)) != len(
+            self.tested_feature_ids
+        ):
+            raise ValueError("tested feature identifiers must be nonempty and unique")
+        if not set(feature_ids).issubset(self.tested_feature_ids):
+            raise ValueError("feature effects must be a subset of the tested feature universe")
+        if len(set(self.covariates)) != len(self.covariates):
+            raise ValueError("feature-effect covariates must be unique")
+        if any(item.contrast != self.contrast for item in self.effects):
+            raise ValueError("every feature effect must match the batch contrast")
+        if any(item.provenance_id != self.effect_provenance_id for item in self.effects):
+            raise ValueError("every feature effect must match the batch effect_provenance_id")
+        domains = {
+            (
+                item.feature_type,
+                item.namespace,
+                item.modality,
+                item.contrast,
+                item.effect_unit,
+                item.species_taxon_id,
+                item.tissue,
+                item.genome_assembly,
+            )
+            for item in self.effects
+        }
+        if len(domains) != 1:
+            raise ValueError("feature-effect batch must describe one coherent upstream contrast")
+        return self
+
+    @property
+    def artifact_hash(self) -> str:
+        """Hash every algorithm-relevant field with set-like inputs canonicalized."""
+        payload = self.model_dump(mode="json")
+        payload["effects"] = sorted(payload["effects"], key=lambda item: item["feature_id"])
+        payload["tested_feature_ids"] = sorted(payload["tested_feature_ids"])
+        payload["covariates"] = sorted(payload["covariates"])
+        return sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
 
 
 def read_feature_effects(
@@ -77,7 +168,16 @@ def read_feature_effects(
     missing = sorted((required | optional).difference(frame.columns))
     if missing:
         raise ValueError(f"feature-effect columns are absent: {missing}")
-    identifiers = tuple(str(value) for value in frame[feature_id_column])
+    identifiers: list[str] = []
+    for value in frame[feature_id_column]:
+        if pd.isna(value):
+            raise ValueError("feature-effect identifiers cannot be missing")
+        identifier = str(value)
+        if not identifier or identifier != identifier.strip():
+            raise ValueError(
+                "feature-effect identifiers must be nonempty without surrounding whitespace"
+            )
+        identifiers.append(identifier)
     if len(set(identifiers)) != len(identifiers):
         raise ValueError("feature-effect identifiers must be unique")
     effects: list[FeatureEffect] = []

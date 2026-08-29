@@ -5,6 +5,109 @@ Keep a Changelog format.
 
 ## [Unreleased]
 
+## [0.4.0a1] - 2026-08-21
+
+### Added
+
+- Completed the Phase 2 evidence layer with typed estimands and calibration references,
+  covariance-aware generalized least-squares and hierarchical fusion, expected-evidence policies,
+  influence diagnostics, and genome-scale expression, methylation, protein, variant, and signature
+  contracts.
+- Added provider-neutral, release-pinned external biology artifacts for annotations, gene sets,
+  overrepresentation and directional ranked-set analysis, interaction networks, variants,
+  ortholog translation, sequencing manifests, provider exports, and bounded-memory NDJSON or
+  optional Parquet archives. Descriptive database outputs remain explicitly outside efficacy
+  fusion.
+- Added Phase 3 prespecified continuous-time linear-Gaussian state estimation with exact
+  irregular-time discretization, partial-channel Kalman updates, RTS smoothing, forecasts,
+  held-out forecast calibration, innovation change-point detection, and hash-bound model and study
+  provenance.
+- Added Phase 4 subject-endpoint contracts, explicit raw-study and latent-state bridges, factorial
+  main-effect and departure-from-additivity analysis, classical and HC3 uncertainty, endpoint
+  weighting, multiplicity control, cell/rank diagnostics, and two-by-two design helpers.
+- Added a fail-closed four-phase workflow with explicit boundary inputs, a serialized Phase 1 QC
+  gate, phase dispositions, cross-validated input/configuration/result identities, manifest-last
+  publishing, no-clobber behavior, and checksum-verified loading.
+- Added deterministic Phase 3, Phase 4, external-biology, and complete four-phase examples plus
+  architecture and stakeholder use-case documentation.
+
+### Changed
+
+- Advanced the Phase 1 audit-report schema to version 3: profiler-origin longitudinal exclusions
+  now participate in the serialized exclusion ledger, and reports strictly bind QC disposition,
+  analysis plans and results, exclusion counts, and artifact inventory. Version 2 reports must be
+  regenerated under the stronger contract.
+- Hardened Phase 1 serialization against non-finite outputs, ambiguous wildcard/exact visit
+  requirements, duplicate or drifting longitudinal axes, nonchronological selected visits,
+  inconsistent readiness-table arithmetic, and detached detection or randomized-inference
+  provenance.
+- Made covariance symmetry, reported-variance agreement, positive-semidefinite checks, and
+  hierarchical cross-modality detection invariant to marginal numerical scale; completed fusion
+  result mappings are now immutable.
+- Bound every paginated provider-export receipt to its exact ordered raw-page bytes (archive format
+  v2), made interaction-network row accounting exhaustive, rejected secret-bearing resource URIs,
+  and rejected symlink redirection in chunked-store integrity paths.
+- Enforced shared feature type/namespace compatibility for upstream feature effects and made
+  Hugging Face embedding provenance immutable and input-aligned; overlapping chunk pooling is now
+  explicitly reported as a nonlinear context heuristic rather than unbiased per-base averaging.
+- Phase 1 longitudinal extraction now resolves exact modality/feature/unit channels, records source
+  rows and effective timestamps, rejects non-finite contamination, and prevents one observation
+  from satisfying more than one expected visit.
+- Phase 1 change, sequential, and randomized-treatment reports now retain structured exclusion,
+  calibration, inference, and reconstruction provenance; serialized fitted detectors are
+  integrity-checked before reuse.
+- Phase 1 randomized treatment-effect inference now requires an explicit randomized-assignment
+  declaration and rejects observational exposure groups before unrestricted label permutation.
+- Study artifact hashing is now order-invariant for subjects, interventions, and observations while
+  continuing to bind logical study content and metadata. Persisted study-derived identities from
+  earlier alpha versions must be regenerated.
+- Factorial analyses now require an explicit randomized or observational assignment declaration;
+  interaction coefficients are documented as departures from additivity on the declared scale,
+  not automatic synergy or efficacy claims.
+- Phase 3 workflow and endpoint bridges now retain the canonical state-report artifact identity;
+  state and combination reports reject contradictory serialized partitions, factorial cells,
+  assignments, coefficients, and inferential summaries. Combination reports additionally bind the
+  complete study used for intervention assignments and covariates.
+- Phase 3 innovation reports now state explicitly that their empirical false-alarm rate is
+  per-innovation and does not control familywise error across a subject trajectory or cohort;
+  serialized held-out partitions and threshold decisions are cross-validated on load.
+- Timed Phase 2-to-3 evidence is now row-order invariant, retains complete estimand, species,
+  tissue, assay, and calibration provenance as observation attributes, rejects mixed semantics
+  within one state channel, and prevents reuse of one evidence record at multiple times. Phase 4
+  rejects unknown endpoint exclusions and requires cell and diagnostic exclusion partitions to
+  agree exactly, while binding the endpoint source artifact into the combination-report identity.
+- Workflow publication and loading now reject symbolic-link roots, managed artifacts, and managed
+  ancestor paths so a bundle cannot read or write outside its selected directory.
+
+## [0.3.0a3] - 2026-08-15
+
+### Added
+
+- Provider-neutral, immutable feature domains, external-resource snapshots, exact feature queries,
+  secret-free query provenance, and separate raw-response versus normalized-artifact checksums.
+- Offline functional-annotation and versioned gene/protein-set imports plus validated,
+  explicit-background overrepresentation analysis with audited local multiplicity correction.
+- Offline interaction-network imports with canonical endpoints, evidence channels, confidence and
+  truncation semantics, seed coverage, and a hard non-fusible evidence boundary.
+- Allele- and assembly-exact variant annotation imports and dosage joins with strict integral
+  coordinates, reference-span validation, and an explicit no-equivalence-normalization policy.
+- Integrity-bound public sequencing manifests preserving study, sample, experiment, and run
+  hierarchy, with verified-only independent-subject counts.
+- Typed protein-abundance matrices, explicit HGNC/STRING identifier semantics, a complete Phase 2
+  structure/use-case guide, and an offline GO/STRING-shaped example.
+
+### Changed
+
+- Hardened ortholog translation with exact source/target domains, source-query and resource
+  provenance, optional declared confidence semantics, target-collision and translated-weight
+  audits, tissue preservation, and a non-fusible boundary.
+- Bound feature-effect batches to their contrast and parent analysis, and included the full
+  signature fingerprint in downstream provenance.
+- Replaced genomic matrix hashing with the tagged, length-delimited v2 schema. Dense and canonical
+  CSR representations of the same logical matrix now hash identically; v2 digest values are not
+  compatible with earlier alpha hashes, so persisted calibration/provenance artifacts must be
+  rebuilt when migrating.
+
 ## [0.3.0a2] - 2026-08-13
 
 ### Added

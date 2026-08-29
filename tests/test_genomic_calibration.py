@@ -1,8 +1,12 @@
+from typing import Any
+
 import numpy as np
+import numpy.typing as npt
 import pytest
 from scipy import sparse
 
 from rejuvenationkit import EffectDirection, Modality
+from rejuvenationkit.evidence import CalibrationValidationStatus
 from rejuvenationkit.genomics import (
     FeatureNamespace,
     GenomicFeature,
@@ -18,12 +22,22 @@ from rejuvenationkit.genomics import (
 
 def genomic_matrix(
     prefix: str,
-    values: np.ndarray,
+    values: npt.NDArray[np.float64],
     *,
     tissue: str = "blood",
     species_taxon_id: int = 9615,
     scale: MatrixScale = MatrixScale.NORMALIZED_EXPRESSION,
     subject_ids: tuple[str, ...] | None = None,
+    cohort: str | None = None,
+    sample_attributes: dict[str, str] | None = None,
+    feature_type: GenomicFeatureType = GenomicFeatureType.GENE,
+    namespace: FeatureNamespace = FeatureNamespace.ENSEMBL,
+    genome_assembly: str | None = None,
+    feature_symbol_prefix: str | None = None,
+    feature_attributes: dict[str, str] | None = None,
+    preprocessing: tuple[str, ...] = (),
+    software_versions: dict[str, str] | None = None,
+    reference_resource_ids: tuple[str, ...] = (),
 ) -> GenomicMatrix:
     samples = tuple(
         GenomicSample(
@@ -31,15 +45,25 @@ def genomic_matrix(
             subject_id=(subject_ids[index] if subject_ids else f"{prefix}-subject-{index}"),
             tissue=tissue,
             species_taxon_id=species_taxon_id,
-            cohort="calibration" if prefix == "train" else "evaluation",
+            cohort=(
+                cohort
+                if cohort is not None
+                else "calibration"
+                if prefix == "train"
+                else "evaluation"
+            ),
+            attributes=sample_attributes or {},
         )
         for index in range(values.shape[0])
     )
     features = tuple(
         GenomicFeature(
             feature_id=f"feature-{index}",
-            feature_type=GenomicFeatureType.GENE,
-            namespace=FeatureNamespace.ENSEMBL,
+            feature_type=feature_type,
+            namespace=namespace,
+            genome_assembly=genome_assembly,
+            symbol=(f"{feature_symbol_prefix}{index}" if feature_symbol_prefix else None),
+            attributes=feature_attributes or {},
         )
         for index in range(values.shape[1])
     )
@@ -48,7 +72,12 @@ def genomic_matrix(
         samples=samples,
         features=features,
         scale=scale,
-        provenance=GenomicMatrixProvenance(source_id=f"{prefix}-matrix"),
+        provenance=GenomicMatrixProvenance(
+            source_id=f"{prefix}-matrix",
+            preprocessing=preprocessing,
+            software_versions=software_versions or {},
+            reference_resource_ids=reference_resource_ids,
+        ),
     )
 
 
@@ -90,6 +119,15 @@ def test_genomic_target_calibrator_uses_out_of_fold_subject_uncertainty() -> Non
     assert result.training_subject_count == 30
     assert result.cross_validated_rmse > 0
     assert result.empirical_absolute_error_quantile > 0
+    assert result.training_artifact_hash == train.artifact_hash
+    assert result.evaluation_artifact_hash == evaluation.artifact_hash
+    assert result.training_provenance_id == "train-matrix"
+    assert result.evaluation_provenance_id == "eval-matrix"
+    assert result.training_domain.species_taxon_id == 9615
+    assert result.training_domain.feature_types == (GenomicFeatureType.GENE,)
+    assert result.training_domain.feature_namespaces == (FeatureNamespace.ENSEMBL,)
+    assert result.training_domain.feature_ids == train.feature_ids
+    assert result.training_domain == result.evaluation_domain
     assert len(result.predictions) == 5
     assert result.feature_ids == train.feature_ids
     prediction = result.predictions[0]
@@ -101,10 +139,21 @@ def test_genomic_target_calibrator_uses_out_of_fold_subject_uncertainty() -> Non
     )
     assert evidence.subject_id == prediction.subject_id
     assert evidence.calibration_id == result.calibration_id
+    assert evidence.calibration_reference is not None
+    assert (
+        evidence.calibration_reference.status
+        is CalibrationValidationStatus.INTERNAL_CROSS_VALIDATED
+    )
+    assert not evidence.calibration_reference.fusion_eligible
+    assert evidence.calibration_reference.estimand == evidence.estimand
+    assert evidence.calibration_reference.artifact_hash == prediction.calibration_artifact_hash
+    assert evidence.calibration_reference.validation_provenance_id == result.training_provenance_id
     assert evidence.standard_error >= prediction.standard_error
     assert "subject_balanced_cross_validated_rmse" in prediction.uncertainty_method
     assert prediction.species_taxon_id == 9615
     assert prediction.tissue == "blood"
+    assert prediction.training_artifact_hash == train.artifact_hash
+    assert prediction.calibration_artifact_hash != result.predictions[1].calibration_artifact_hash
     assert prediction.out_of_domain_threshold == result.out_of_domain_threshold
 
 
@@ -188,6 +237,101 @@ def test_calibrator_rejects_domain_shift(
     )
     with pytest.raises(ValueError, match=message):
         calibrator.predict(evaluation)
+
+
+def test_calibration_identity_binds_complete_training_artifact() -> None:
+    train, targets = training_fixture()
+    values = train.dense_values()
+    baseline_id = GenomicTargetCalibrator(config()).fit(train, targets).calibration_id
+    changed_artifacts = (
+        genomic_matrix("train", values, tissue="liver"),
+        genomic_matrix("train", values, species_taxon_id=9606),
+        genomic_matrix("train", values, scale=MatrixScale.LOG_CPM),
+        genomic_matrix("train", values, namespace=FeatureNamespace.REFSEQ),
+        genomic_matrix(
+            "train",
+            values,
+            feature_type=GenomicFeatureType.TRANSCRIPT,
+        ),
+        genomic_matrix("train", values, genome_assembly="CanFam3.1"),
+        genomic_matrix("train", values, preprocessing=("log-cpm:v2",)),
+        genomic_matrix("train", values, software_versions={"normalizer": "2.0"}),
+        genomic_matrix("train", values, reference_resource_ids=("Ensembl-110",)),
+        genomic_matrix("train", values, sample_attributes={"collection_site": "A"}),
+    )
+
+    assert all(item.content_hash == train.content_hash for item in changed_artifacts)
+    assert all(item.artifact_hash != train.artifact_hash for item in changed_artifacts)
+    changed_ids = {
+        GenomicTargetCalibrator(config()).fit(item, targets).calibration_id
+        for item in changed_artifacts
+    }
+    assert baseline_id not in changed_ids
+    assert len(changed_ids) == len(changed_artifacts)
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"namespace": FeatureNamespace.REFSEQ}, "namespace"),
+        ({"feature_type": GenomicFeatureType.TRANSCRIPT}, "feature type"),
+        ({"genome_assembly": "CanFam4"}, "genome assembly"),
+        ({"feature_symbol_prefix": "changed-"}, "feature metadata"),
+        ({"feature_attributes": {"annotation_release": "111"}}, "feature metadata"),
+        ({"preprocessing": ("log-cpm:v2",)}, "preprocessing differs"),
+        ({"software_versions": {"normalizer": "2.0"}}, "software differs"),
+        ({"reference_resource_ids": ("Ensembl-111",)}, "reference resources"),
+    ],
+)
+def test_calibrator_rejects_incompatible_feature_and_pipeline_domain(
+    changes: dict[str, Any],
+    message: str,
+) -> None:
+    generator = np.random.default_rng(41)
+    training_values = generator.normal(size=(30, 5))
+    domain: dict[str, Any] = {
+        "genome_assembly": "CanFam3.1",
+        "feature_symbol_prefix": "gene-",
+        "preprocessing": ("log-cpm:v1",),
+        "software_versions": {"normalizer": "1.0"},
+        "reference_resource_ids": ("Ensembl-110",),
+    }
+    train = genomic_matrix("train", training_values, **domain)
+    targets = {
+        sample_id: float(value)
+        for sample_id, value in zip(train.sample_ids, training_values[:, 0], strict=True)
+    }
+    calibrator = GenomicTargetCalibrator(config()).fit(train, targets)
+    evaluation_domain = domain | changes
+    evaluation = genomic_matrix(
+        "eval",
+        generator.normal(size=(3, 5)),
+        **evaluation_domain,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        calibrator.predict(evaluation)
+
+
+def test_evaluation_sample_metadata_is_artifact_bound_but_not_a_domain_constraint() -> None:
+    train, targets = training_fixture()
+    generator = np.random.default_rng(42)
+    values = generator.normal(size=(3, 5))
+    baseline = genomic_matrix("eval", values, sample_attributes={"site": "A"})
+    changed = genomic_matrix("eval", values, sample_attributes={"site": "B"})
+    calibrator = GenomicTargetCalibrator(config()).fit(train, targets)
+
+    baseline_result = calibrator.predict(baseline)
+    changed_result = calibrator.predict(changed)
+
+    assert baseline.content_hash == changed.content_hash
+    assert baseline.artifact_hash != changed.artifact_hash
+    assert baseline_result.evaluation_artifact_hash == baseline.artifact_hash
+    assert changed_result.evaluation_artifact_hash == changed.artifact_hash
+    assert baseline_result.evaluation_domain == changed_result.evaluation_domain
+    assert [item.estimate for item in baseline_result.predictions] == [
+        item.estimate for item in changed_result.predictions
+    ]
 
 
 def test_calibrator_rejects_invalid_training_inputs_and_unfitted_use() -> None:

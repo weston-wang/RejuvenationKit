@@ -91,9 +91,14 @@ Every finding includes a stable code, severity, message, affected subject identi
 observation indices, and check-specific context. Downstream workflows should branch on codes,
 not human-readable messages.
 
+Configured range bounds and observation standard errors must be finite. Non-finite measured values
+remain representable at ingestion so QC can report them explicitly, but they never enter visit-level
+analysis vectors.
+
 ## Analysis-readiness profiling
 
-The profile contains three typed tables:
+The profile contains typed readiness tables plus the structured visit-alignment exclusions that
+explain every omitted profile value:
 
 | Table | Question answered |
 |---|---|
@@ -102,11 +107,18 @@ The profile contains three typed tables:
 | `paired_readiness` | How many subjects can support a paired comparison for each shared feature? |
 | `feature_distributions` | What are the visit-level quantiles, spread, and robust outliers? |
 | `attrition_bias` | Do retained and missing-follow-up subjects differ at baseline? |
+| `differential_attrition` | Do treatment/cohort arms lose complete cases at different rates? |
+| `longitudinal_exclusions` | Why was a subject/visit/channel omitted from profiling? |
 
 Every table includes an `all` cohort summary and separate rows for each actual cohort. Coverage
 uses finite measurements inside the configured inclusive visit window. Complete-case retention
 requires every feature specified for both visits; paired readiness is feature-specific and is
 therefore often less restrictive.
+
+Because `all` names the aggregate, a study that combines a literal `all` cohort with other cohort
+labels is rejected rather than silently overwriting that summary. Serialized rows revalidate
+count/fraction arithmetic, quantile ordering, outlier counts, and attrition contrasts before a
+profile can be loaded into an audit.
 
 Distribution rows aggregate repeated matching observations within a subject before calculating
 the mean, sample standard deviation, quartiles, extrema, and Tukey fences. Values below
@@ -123,14 +135,46 @@ Profiles quantify usable data but do not test treatment effects. In a cross-sect
 different subjects are collected at each age, visit coverage remains useful while paired
 longitudinal readiness is not scientifically applicable.
 
+## One-command audit and analysis gate
+
+`run_phase1_audit` can include prespecified held-out pairwise detection, held-out sequential
+detection, and randomized treatment-effect inference in the same integrity-tracked bundle. A
+`SequentialDetectionAuditPlan` declares at least three ordered visit identifiers, the detector
+configuration, and disjoint reference and evaluation subject identifiers. Sequential outputs
+include subject summaries, transition-level trajectories, and (when visualization is enabled)
+trajectory, classification, and modality-evidence figures.
+
+Inferential and detection plans do **not** run when the QC report contains an error. The audit is
+still published, records `analysis_blocked_by_qc=true`, retains each requested plan, and explains
+the gate in `summary.md`. If a protocol owner has a documented reason to continue, set
+`Phase1AuditConfig(allow_analysis_with_qc_errors=True)`. The serialized report then records
+`analysis_override_applied=true`; this is an audit trail, not a claim that the underlying error is
+harmless.
+
+All visit-aligned analyses use the shared exact-channel contract: feature, modality, unit,
+within-window aggregation policy, selected source-row indices, and effective observed timestamp.
+The bundle always includes `longitudinal_exclusions.csv`, even when it contains only its header.
+Every omitted value, incomplete vector, or excluded trajectory is represented by a structured
+reason, including omissions produced while building the readiness profile, and `audit.json`
+includes counts by analysis and reason. Identical exclusions are deduplicated within an analysis;
+the same omission remains separately attributed when it affects profiling and an optional
+inferential analysis. Detection plots label exact units and aggregation policies; sequential
+trajectory plots use selected observation timestamps rather than nominal visit spacing.
+
+Bundle files are first rendered in a staging directory. Only a complete staged bundle is
+published, and artifacts listed by a previous manifest but absent from the new run are removed.
+Files in the output directory that were not managed by the previous manifest are preserved.
+
 ## Randomized treatment effects
 
 After QC and readiness profiling pass, `RandomizedTreatmentEffectEvaluator` compares prespecified
 treated and control groups across one or more follow-up visits. It produces signed,
 feature-specific differences in change from baseline, bootstrap confidence intervals, a
 covariance-aware permutation test, and subject-level scores calibrated entirely from out-of-fold
-controls. See [Randomized treatment-effect inference](randomized-treatment-effects.md) for the
-workflow and interpretation limits.
+controls. Its configuration requires an explicit randomized-assignment declaration and rejects
+observational assignment rather than presenting confounded comparisons as randomized inference.
+See [Randomized treatment-effect inference](randomized-treatment-effects.md) for the workflow and
+interpretation limits.
 
 ## Expected-visit semantics
 
@@ -203,6 +247,14 @@ Associations below `batch_confounding_threshold` are warnings; associations at o
 threshold are errors. The legacy `batch_assignment_confounding` code is preserved for batch
 assignment errors. Other factors use `experimental_assignment_confounding`.
 
+Assignment-versus-factor screening uses one independent subject as the unit of analysis and only
+includes subjects whose factor level is stable for that assay/feature. Subjects observed across
+multiple plates, lots, or sites are counted in `excluded_changing_factor_subjects` rather than
+pseudo-replicated. Timepoint screening uses one unique subject-visit record, excludes records with
+multiple factor levels, reports them in `excluded_changing_factor_records`, and labels the unit in
+the finding context. Cramér's V remains a descriptive screening statistic, not a clustered
+hypothesis test.
+
 When expected visits are configured, the same engine tests whether visit identity is associated
 with each factor. This catches longitudinal designs in which all baseline samples use one plate or
 assay version and all follow-up samples use another. Such designs cannot distinguish biological
@@ -231,7 +283,19 @@ config = QCConfig(
 
 - Global `FeatureRule(required=True)` still checks whether a subject has the feature anywhere in
   the study. `ExpectedVisit` adds protocol-specific visit-level completeness.
-- Overlapping visit windows are allowed; a measurement may satisfy more than one visit.
+- Overlapping visit windows are allowed only when distinct measurements resolve to the requested
+  visits. One source observation cannot satisfy multiple visits for the same subject and channel:
+  QC emits `observation_reused_across_expected_visits`, and longitudinal extraction excludes the
+  reused visit-channel before paired or sequential inference.
+- Exact and wildcard requests for the same feature cannot coexist when their modalities overlap,
+  including inside `ExpectedVisit.required_features`. They could otherwise resolve to the same
+  channel and count one measurement twice. Exact requests for the same feature remain valid when
+  they declare distinct modalities. Serialized extractions bind every value to the exact declared
+  subject, visit, channel index, and channel identity; visit-vector collections require unique
+  subject/visit keys and one shared exact channel axis.
+- Within each subject and channel, selected observation times must increase in the declared visit
+  order. A later-declared visit selected at the same or an earlier time is excluded with
+  `nonchronological_observed_time` rather than being converted into a backward change score.
 - Replicate checks compare measurements with the same subject, timestamp, modality, feature, and
   batch but distinct replicate identifiers.
 - Batch screening requires the configured minimum number of observations both inside and outside

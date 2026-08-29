@@ -69,6 +69,36 @@ def from_expression_frame(
     )
 
 
+def from_protein_abundance_frame(
+    frame: pd.DataFrame,
+    *,
+    samples: tuple[GenomicSample, ...],
+    provenance: GenomicMatrixProvenance,
+    namespace: FeatureNamespace = FeatureNamespace.UNIPROT,
+    scale: MatrixScale = MatrixScale.PROTEIN_ABUNDANCE,
+) -> GenomicMatrix:
+    """Convert linear nonnegative or normalized log protein outputs into a matrix."""
+    if namespace not in {
+        FeatureNamespace.UNIPROT,
+        FeatureNamespace.STRING_PROTEIN,
+        FeatureNamespace.CUSTOM,
+    }:
+        raise ValueError("protein abundance requires a protein-compatible identifier namespace")
+    if scale not in {
+        MatrixScale.PROTEIN_ABUNDANCE,
+        MatrixScale.LOG_PROTEIN_ABUNDANCE,
+    }:
+        raise ValueError("protein abundance requires a linear or log protein-abundance scale")
+    return from_expression_frame(
+        frame,
+        samples=samples,
+        namespace=namespace,
+        scale=scale,
+        provenance=provenance,
+        feature_type=GenomicFeatureType.PROTEIN,
+    )
+
+
 def from_methylation_beta(
     frame: pd.DataFrame,
     *,

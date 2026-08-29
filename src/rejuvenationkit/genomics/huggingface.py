@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
+from types import MappingProxyType
 from typing import Any, Protocol, Self
 
 import numpy as np
 import numpy.typing as npt
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _SEQUENCE_PATTERN = re.compile(r"^[ACGTN]+$")
 _COMPLEMENT = str.maketrans("ACGTN", "TGCAN")
+_OVERLAP_WARNING = "overlapping_chunk_pooling_is_a_context_heuristic"
 
 
 class PoolingStrategy(StrEnum):
@@ -134,24 +136,69 @@ class EmbeddingProvenance(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    model_id: str
-    model_revision: str
-    tokenizer_revision: str
-    weights_license: str
+    model_id: str = Field(min_length=1)
+    model_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    tokenizer_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    weights_license: str = Field(min_length=1)
     layer: int
     model_class: HFModelClass
     pooling: PoolingStrategy
     strand_policy: StrandPolicy
     overlength_policy: OverlengthPolicy
-    maximum_bases: int
-    chunk_overlap_bases: int
-    maximum_tokens: int
-    batch_size: int
-    device: str
+    maximum_bases: int = Field(ge=16)
+    chunk_overlap_bases: int = Field(ge=0)
+    maximum_tokens: int = Field(ge=8)
+    batch_size: int = Field(ge=1)
+    device: str = Field(min_length=1)
     trust_remote_code: bool
     local_files_only: bool
-    library_versions: dict[str, str]
-    input_hashes: dict[str, str]
+    library_versions: Mapping[str, str]
+    input_hashes: Mapping[str, str]
+    warnings: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_and_freeze_provenance(self) -> Self:
+        """Revalidate direct construction and freeze every identity-bearing map."""
+        if self.chunk_overlap_bases >= self.maximum_bases:
+            raise ValueError("chunk_overlap_bases must be smaller than maximum_bases")
+        if self.overlength_policy is OverlengthPolicy.ERROR and self.chunk_overlap_bases != 0:
+            raise ValueError("chunk overlap is only valid with chunk_mean overlength policy")
+        for name, value in self.library_versions.items():
+            if (
+                not name.strip()
+                or name != name.strip()
+                or not value.strip()
+                or value != value.strip()
+            ):
+                raise ValueError("library version names and values must be clean nonempty strings")
+        for sequence_id, digest in self.input_hashes.items():
+            if not sequence_id.strip() or sequence_id != sequence_id.strip():
+                raise ValueError("embedding input identifiers must be clean nonempty strings")
+            if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ValueError("embedding input hashes must be lowercase SHA-256 digests")
+        if len(set(self.warnings)) != len(self.warnings):
+            raise ValueError("embedding provenance warnings must be unique")
+        if self.chunk_overlap_bases > 0 and _OVERLAP_WARNING not in self.warnings:
+            raise ValueError("overlapping chunk pooling requires its context-heuristic warning")
+        object.__setattr__(
+            self,
+            "library_versions",
+            MappingProxyType(dict(sorted(self.library_versions.items()))),
+        )
+        object.__setattr__(
+            self,
+            "input_hashes",
+            MappingProxyType(dict(sorted(self.input_hashes.items()))),
+        )
+        return self
+
+    @field_serializer("library_versions", "input_hashes")
+    def serialize_provenance_mappings(
+        self,
+        value: Mapping[str, str],
+    ) -> dict[str, str]:
+        """Serialize immutable provenance fields through ordinary mappings."""
+        return dict(value)
 
 
 EmbeddingValues = npt.NDArray[np.float64]
@@ -167,11 +214,17 @@ class EmbeddingBatch:
 
     def __post_init__(self) -> None:
         """Validate alignment and freeze finite embedding values."""
+        validated_provenance = EmbeddingProvenance.model_validate(
+            self.provenance.model_dump(mode="python")
+        )
+        object.__setattr__(self, "provenance", validated_provenance)
         array = np.asarray(self.values, dtype=float).copy()
         if array.ndim != 2 or array.shape[0] != len(self.sequence_ids):
             raise ValueError("embedding matrix must align rows to sequence_ids")
         if len(set(self.sequence_ids)) != len(self.sequence_ids):
             raise ValueError("sequence_ids must be unique")
+        if set(self.provenance.input_hashes) != set(self.sequence_ids):
+            raise ValueError("embedding provenance input hashes must exactly match sequence_ids")
         if not np.isfinite(array).all():
             raise ValueError("embedding values must be finite")
         array.flags.writeable = False
@@ -190,6 +243,10 @@ class VariantEmbedding:
 
     def __post_init__(self) -> None:
         """Validate that all variant embedding vectors align and are finite."""
+        validated_provenance = EmbeddingProvenance.model_validate(
+            self.provenance.model_dump(mode="python")
+        )
+        object.__setattr__(self, "provenance", validated_provenance)
         arrays = tuple(
             np.asarray(value, dtype=float).copy()
             for value in (
@@ -312,6 +369,7 @@ class HFGenomeEmbedder:
             input_hashes={
                 item.sequence_id: sha256(item.sequence.encode()).hexdigest() for item in windows
             },
+            warnings=((_OVERLAP_WARNING,) if self.config.chunk_overlap_bases > 0 else ()),
         )
         return EmbeddingBatch(sequence_ids=identifiers, values=pooled, provenance=provenance)
 

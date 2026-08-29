@@ -209,3 +209,13 @@ def test_nonfinite_estimates_and_duplicate_configuration_are_rejected() -> None:
             bias=float("inf"),
             calibration_id="invalid",
         )
+
+
+def test_fusion_result_mappings_are_immutable_and_serializable() -> None:
+    result = PrecisionWeightedFusion().fuse((estimate(Modality.CLINICAL, -1.0),))
+
+    with pytest.raises(TypeError):
+        result.modality_weights[Modality.CLINICAL] = 99.0  # type: ignore[index]
+    with pytest.raises(TypeError):
+        result.calibration_ids[Modality.CLINICAL] = "forged"  # type: ignore[index]
+    assert result.model_validate(result.model_dump(mode="python")) == result

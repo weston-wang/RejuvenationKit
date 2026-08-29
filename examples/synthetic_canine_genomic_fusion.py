@@ -6,10 +6,15 @@ measure and diagnose; it does not estimate an observed rapamycin effect in dogs.
 
 from __future__ import annotations
 
+from hashlib import sha256
+
 import numpy as np
 
 from rejuvenationkit import (
+    CalibrationReference,
+    CalibrationValidationStatus,
     EffectDirection,
+    Estimand,
     EvidenceCovariance,
     EvidenceEstimate,
     EvidenceFusionConfig,
@@ -17,6 +22,7 @@ from rejuvenationkit import (
     FusionModel,
     GeneralizedLeastSquaresFusion,
     HierarchicalEvidenceFusion,
+    MissingCovariancePolicy,
     Modality,
 )
 from rejuvenationkit.genomics import (
@@ -30,6 +36,7 @@ from rejuvenationkit.genomics import (
     MatrixScale,
     SignatureContrastBatch,
     SignatureContrastConfig,
+    SignatureEstimate,
     SignatureFeature,
     estimate_signature_contrasts,
     score_weighted_signature,
@@ -159,13 +166,37 @@ def genomic_evidence(
         ),
         contrast,
     )
-    evidence, covariance = batch.to_evidence(
-        modality=Modality.TRANSCRIPTOMICS,
-        calibration_id="synthetic-score-identity-not-biological-age",
-        assay_id="synthetic-rna-seq",
-        correlation_group="shared-rna-subjects",
+    evidence = tuple(
+        item.to_evidence(
+            evidence_id=item.signature_id,
+            modality=Modality.TRANSCRIPTOMICS,
+            calibration_reference=_synthetic_calibration_reference(item),
+            assay_id="synthetic-rna-seq",
+            correlation_group="shared-rna-subjects",
+        )
+        for item in batch.estimates
     )
-    return evidence, covariance, batch
+    return evidence, batch.covariance, batch
+
+
+def _synthetic_calibration_reference(estimate: SignatureEstimate) -> CalibrationReference:
+    """Declare the example's deliberately unvalidated identity calibration."""
+    target = Estimand(
+        name=estimate.target_name,
+        unit=estimate.target_unit,
+        direction=estimate.direction,
+        population=estimate.estimand_population,
+        time_contrast=estimate.time_contrast,
+    )
+    calibration_id = f"synthetic-unvalidated:{estimate.signature_id}"
+    return CalibrationReference(
+        calibration_id=calibration_id,
+        artifact_hash=sha256(f"{calibration_id}:{target.key}".encode()).hexdigest(),
+        status=CalibrationValidationStatus.UNVERIFIED,
+        estimand=target,
+        method="synthetic identity mapping for software demonstration only",
+        validation_provenance_id="synthetic-no-validation",
+    )
 
 
 def main() -> None:
@@ -181,9 +212,16 @@ def main() -> None:
         source_id=f"{covariance.source_id}:primary-response-block",
         effective_sample_size=covariance.effective_sample_size,
     )
-    naive = GeneralizedLeastSquaresFusion().fuse(primary)
+    exploratory_config = EvidenceFusionConfig(
+        require_fusion_eligible_calibration=False,
+        missing_covariance_policy=MissingCovariancePolicy.WARN_ASSUME_INDEPENDENT,
+    )
+    naive = GeneralizedLeastSquaresFusion(exploratory_config).fuse(primary)
     covariance_aware = GeneralizedLeastSquaresFusion(
-        EvidenceFusionConfig(weight_constraint=EvidenceWeightConstraint.NONNEGATIVE)
+        EvidenceFusionConfig(
+            weight_constraint=EvidenceWeightConstraint.NONNEGATIVE,
+            require_fusion_eligible_calibration=False,
+        )
     ).fuse(primary, primary_covariance)
 
     clinical = EvidenceEstimate(
@@ -193,6 +231,14 @@ def main() -> None:
         estimate=-0.6,
         standard_error=0.45,
         calibration_id="synthetic-clinical-score-calibration-v1",
+        calibration_reference=CalibrationReference(
+            calibration_id="synthetic-clinical-score-calibration-v1",
+            artifact_hash=sha256(b"synthetic-clinical-score-calibration-v1").hexdigest(),
+            status=CalibrationValidationStatus.UNVERIFIED,
+            estimand=estimates[0].estimand,
+            method="synthetic identity mapping for software demonstration only",
+            validation_provenance_id="synthetic-no-validation",
+        ),
         provenance_id="synthetic-canine-clinical-v1",
         tissue="whole-animal",
         species_taxon_id=9615,
@@ -208,7 +254,8 @@ def main() -> None:
         effective_sample_size=covariance.effective_sample_size,
     )
     hierarchical = HierarchicalEvidenceFusion(
-        across_modality_model=FusionModel.RANDOM_EFFECTS
+        EvidenceFusionConfig(require_fusion_eligible_calibration=False),
+        across_modality_model=FusionModel.RANDOM_EFFECTS,
     ).fuse(combined, full_covariance)
 
     print("Synthetic canine rapamycin genomic fusion")

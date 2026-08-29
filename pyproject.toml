@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rejuvenationkit"
-version = "0.3.0a2"
+version = "0.4.0a1"
 description = "Engineering-grade auditing and analysis for longitudinal rejuvenation studies."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,6 +36,7 @@ dev = [
   "pytest>=8.4",
   "pytest-cov>=6.2",
   "ruff>=0.12",
+  "twine>=6.1",
 ]
 docs = [
   "mkdocs-material>=9.6",
@@ -50,6 +51,9 @@ genomics = [
 ]
 hts = [
   "pysam>=0.24,<1",
+]
+arrow = [
+  "pyarrow>=17,<24",
 ]
 genome-hf = [
   "huggingface-hub>=0.27,<2",

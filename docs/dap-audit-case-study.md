@@ -23,6 +23,12 @@ calibration/evaluation split.
 
 ## Results
 
+The table records a prior online reference run. The repository regression-tests the adapter and
+audit behavior with bounded fixtures, but it does not contain the downloaded archive or its raw
+SHA-256 digest. These exact values are therefore a documented manual benchmark, not a
+content-addressed CI result; reruns should retain the acquired archive and generated manifest when
+exact cross-run comparison is required.
+
 | Audit result | Value |
 |---|---:|
 | Subjects | 972 dogs |
@@ -70,7 +76,8 @@ The workflow exports:
 - a manifest containing the byte size and SHA-256 digest of every other artifact.
 
 The validated study model receives a canonical SHA-256 input fingerprint. Re-running with changed
-subjects, observations, ordering, or metadata changes that fingerprint.
+logical subjects, observations, or metadata changes that fingerprint; tuple ordering is
+canonicalized and audited separately by the Phase 1 input-order check.
 
 ## What this case does not validate
 

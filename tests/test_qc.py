@@ -84,6 +84,8 @@ def test_clean_study_passes_and_summarizes() -> None:
         "batches": 0,
         "expected_visits": 0,
     }
+    with pytest.raises(TypeError):
+        report.metrics["subjects"] = 99  # type: ignore[index]
 
 
 def test_range_unit_and_nonfinite_checks() -> None:
@@ -96,6 +98,19 @@ def test_range_unit_and_nonfinite_checks() -> None:
     assert codes(report) == {"nonfinite_value", "out_of_range", "unexpected_unit"}
     assert not report.passed
     assert report.counts[Severity.ERROR] == 3
+    with pytest.raises(TypeError):
+        report.findings[0].context["forged"] = True  # type: ignore[index]
+
+
+@pytest.mark.parametrize("bound", (float("nan"), float("inf"), float("-inf")))
+def test_feature_rules_reject_nonfinite_range_bounds(bound: float) -> None:
+    with pytest.raises(ValidationError, match="range bounds must be finite"):
+        FeatureRule(feature="body_mass", minimum=bound)
+
+
+def test_qc_configuration_rejects_infinite_tolerances() -> None:
+    with pytest.raises(ValidationError, match="finite number"):
+        QCConfig(replicate_relative_tolerance=float("inf"))
 
 
 def test_missing_required_feature_uses_configured_severity() -> None:
@@ -221,6 +236,35 @@ def test_complete_expected_visit_within_inclusive_window_passes() -> None:
     assert report.metrics["expected_visits"] == 1
 
 
+def test_qc_flags_observation_eligible_for_overlapping_expected_visits() -> None:
+    requirement = (VisitFeature(feature="body_mass", modality=Modality.CLINICAL),)
+    visits = (
+        ExpectedVisit(
+            visit_id="day-6",
+            scheduled_at=START + timedelta(days=6),
+            window_after=timedelta(days=2),
+            required_features=requirement,
+        ),
+        ExpectedVisit(
+            visit_id="day-8",
+            scheduled_at=START + timedelta(days=8),
+            window_before=timedelta(days=2),
+            required_features=requirement,
+        ),
+    )
+    report = BaselineLongitudinalQC(QCConfig(expected_visits=visits)).run(
+        make_study(row("s1", 30, day=7), subjects=("s1",))
+    )
+
+    finding = next(
+        item for item in report.findings if item.code == "observation_reused_across_expected_visits"
+    )
+    assert finding.severity is Severity.ERROR
+    assert finding.subject_ids == ("s1",)
+    assert finding.observation_indices == (0,)
+    assert finding.context["visit_ids"] == "day-6,day-8"
+
+
 def test_fully_missing_visit_reports_eligible_subjects() -> None:
     config = QCConfig(
         expected_visits=(visit(),),
@@ -306,13 +350,36 @@ def test_invalid_expected_visit_configuration_is_rejected() -> None:
             window_before=timedelta(days=-1),
             required_features=(VisitFeature(feature="body_mass"),),
         )
-    with pytest.raises(ValidationError, match="required_features must be unique"):
+    with pytest.raises(ValidationError, match="only valid for an anchor-relative"):
+        ExpectedVisit(
+            visit_id="ignored-offset",
+            scheduled_at=START,
+            offset=timedelta(days=1),
+            required_features=(VisitFeature(feature="body_mass"),),
+        )
+    with pytest.raises(ValidationError, match="subject_ids must be unique"):
+        ExpectedVisit(
+            visit_id="duplicate-subject-selector",
+            scheduled_at=START,
+            required_features=(VisitFeature(feature="body_mass"),),
+            subject_ids=("s1", "s1"),
+        )
+    with pytest.raises(ValidationError, match="cannot overlap"):
         ExpectedVisit(
             visit_id="duplicates",
             scheduled_at=START,
             required_features=(
                 VisitFeature(feature="body_mass"),
                 VisitFeature(feature="body_mass"),
+            ),
+        )
+    with pytest.raises(ValidationError, match="cannot overlap"):
+        ExpectedVisit(
+            visit_id="wildcard-exact-overlap",
+            scheduled_at=START,
+            required_features=(
+                VisitFeature(feature="body_mass"),
+                VisitFeature(feature="body_mass", modality=Modality.CLINICAL),
             ),
         )
     duplicate = visit()
@@ -367,6 +434,30 @@ def test_relative_visit_reports_missing_subject_anchor() -> None:
     )
     assert codes(report) == {"visit_anchor_missing"}
     assert report.findings[0].context["anchor_id"] == "first_dose"
+
+
+def test_visit_missingness_denominator_excludes_unschedulable_subjects() -> None:
+    expected = ExpectedVisit(
+        visit_id="after-dose",
+        anchor_id="first_dose",
+        offset=timedelta(days=7),
+        required_features=(VisitFeature(feature="body_mass"),),
+    )
+    source = Study(
+        study_id="partial-anchors",
+        subjects=(
+            Subject(subject_id="scheduled", cohort="treated", anchors={"first_dose": START}),
+            Subject(subject_id="no-anchor", cohort="treated"),
+        ),
+        observations=(),
+    )
+
+    report = BaselineLongitudinalQC(QCConfig(expected_visits=(expected,))).run(source)
+
+    missing = next(item for item in report.findings if item.code == "expected_visit_missing")
+    assert missing.context["missing_fraction"] == 1
+    assert missing.context["schedulable_subjects"] == 1
+    assert "1/1 schedulable subjects" in missing.message
 
 
 def test_expected_visit_requires_exactly_one_schedule_mode() -> None:
@@ -519,6 +610,89 @@ def test_timepoint_plate_confounding_is_detected() -> None:
     assert finding.severity is Severity.ERROR
     assert finding.context["nuisance_factor"] == "plate"
     assert finding.context["factor"] == "timepoint"
+    assert finding.context["unit_of_analysis"] == "subject_visit"
+
+
+def test_timepoint_confounding_excludes_subject_visits_with_changing_factor() -> None:
+    subjects = tuple(Subject(subject_id=f"s{index}", cohort="all") for index in range(4))
+    observations = [
+        row(
+            subject.subject_id,
+            30 + visit_index,
+            day=visit_index * 7,
+            replicate_id=f"{subject.subject_id}-{visit_index}",
+            attributes={"plate": "baseline-plate" if visit_index == 0 else "followup-plate"},
+        )
+        for subject in subjects
+        for visit_index in range(2)
+    ]
+    observations.append(
+        row(
+            "s3",
+            30,
+            day=0,
+            replicate_id="s3-baseline-second-plate",
+            attributes={"plate": "unexpected-plate"},
+        )
+    )
+    visits = (
+        ExpectedVisit(
+            visit_id="baseline",
+            scheduled_at=START,
+            required_features=(VisitFeature(feature="body_mass"),),
+        ),
+        ExpectedVisit(
+            visit_id="week-1",
+            scheduled_at=START + timedelta(days=7),
+            required_features=(VisitFeature(feature="body_mass"),),
+        ),
+    )
+
+    report = BaselineLongitudinalQC(QCConfig(expected_visits=visits)).run(
+        Study(study_id="plate-time-changing", subjects=subjects, observations=tuple(observations))
+    )
+
+    finding = next(
+        item
+        for item in report.findings
+        if item.code == "timepoint_factor_confounding"
+        and item.context["nuisance_factor"] == "plate"
+    )
+    assert finding.context["records"] == 7
+    assert finding.context["excluded_changing_factor_records"] == 1
+
+
+def test_assignment_confounding_uses_one_stable_factor_level_per_subject() -> None:
+    subjects = tuple(
+        Subject(
+            subject_id=f"s{index}",
+            cohort="treated" if index < 2 else "control",
+            interventions=("therapy",) if index < 2 else (),
+        )
+        for index in range(4)
+    )
+    observations = tuple(
+        row(
+            subject.subject_id,
+            30 + visit_index,
+            day=visit_index * 7,
+            attributes={"vector_lot": "A" if visit_index == 0 else "B"},
+        )
+        for subject in subjects
+        for visit_index in range(2)
+    )
+
+    report = BaselineLongitudinalQC().run(
+        Study(study_id="within-subject-lots", subjects=subjects, observations=observations)
+    )
+
+    assignment_findings = [
+        finding
+        for finding in report.findings
+        if finding.code == "experimental_assignment_confounding"
+        and finding.context["nuisance_factor"] == "vector_lot"
+    ]
+    assert assignment_findings == []
 
 
 def test_custom_subject_attribute_factor_and_disable_switch() -> None:

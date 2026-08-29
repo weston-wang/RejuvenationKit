@@ -42,10 +42,32 @@ detector = SequentialTreatmentResponseDetector(
 report = detector.score(study, visits=visits, subject_ids=treated_ids)
 ```
 
+## Serialized-model integrity and reconstruction
+
+A fitted `SequentialDetectionModel` records the full configuration, ordered visit definitions,
+resolved modality/feature/unit/aggregation channels, requested and complete reference-subject
+IDs, the reference-input artifact hash, and the sorted distribution of per-subject maximum
+cumulative scores. Its `threshold_quantile_method` is explicitly `higher`. Validation recomputes
+`maximum_cumulative_score_threshold` from that distribution and the stored `false_alarm_rate`.
+
+The deterministic `model_artifact_hash` covers every other serialized model field.
+`SequentialDetectionModel.model_validate(...)` and `model_validate_json(...)` reject incomplete
+fit provenance, inconsistent config or channel summaries, impossible reference counts, a changed
+threshold, and a stale model hash. `SequentialTreatmentResponseDetector.from_model(...)`
+revalidates before reconstructing drift, covariance, Cholesky, and empirical reference state; it
+does not accept a lightweight report-only model without complete fitted provenance.
+
+At scoring time, the detector reconstructs the exact reference trajectories from the supplied
+`Study` and verifies the fit-time reference-input artifact. Changes to subject identity, observed
+values or times, visit definitions, or resolved channels therefore fail closed. The SHA-256
+identifiers support content integrity and reproducibility; they are not keyed signatures or
+evidence that the reference cohort is scientifically appropriate.
+
 ## Interpretation and limits
 
 - Prefer a concurrent randomized placebo group. An observational reference cohort supports
   anomaly monitoring, not a treatment-effect claim.
+- Evaluation IDs must be disjoint from the fitted reference IDs; overlap is rejected.
 - Detection is directionless: it identifies an unusual joint trajectory, not improvement.
 - `persistent=True` means the configured number of final consecutive scores exceeded the
   threshold. `transient=True` requires a later fall below threshold. A final crossing without

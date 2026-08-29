@@ -6,6 +6,8 @@ from pydantic import ValidationError
 
 import rejuvenationkit.genomics.huggingface as huggingface_module
 from rejuvenationkit.genomics import (
+    EmbeddingBatch,
+    EmbeddingProvenance,
     HFGenomeEmbedder,
     HFGenomeEncoderConfig,
     OverlengthPolicy,
@@ -71,6 +73,29 @@ def test_offline_backend_produces_deterministic_provenance_without_raw_sequence(
     assert first.provenance.input_hashes["promoter-1"] != windows[0].sequence
     assert len(first.provenance.input_hashes["promoter-1"]) == 64
     assert not first.values.flags.writeable
+    with pytest.raises(TypeError):
+        first.provenance.input_hashes["promoter-1"] = "f" * 64  # type: ignore[index]
+    with pytest.raises(TypeError):
+        first.provenance.library_versions["transformers"] = "forged"  # type: ignore[index]
+    assert (
+        EmbeddingProvenance.model_validate(first.provenance.model_dump(mode="python"))
+        == first.provenance
+    )
+
+    mismatched = first.provenance.model_copy(update={"input_hashes": {"different": "f" * 64}})
+    with pytest.raises(ValueError, match="exactly match sequence_ids"):
+        EmbeddingBatch(
+            sequence_ids=first.sequence_ids,
+            values=first.values,
+            provenance=mismatched,
+        )
+    invalid_revision = first.provenance.model_copy(update={"model_revision": "main"})
+    with pytest.raises(ValidationError, match="string_pattern_mismatch"):
+        EmbeddingBatch(
+            sequence_ids=first.sequence_ids,
+            values=first.values,
+            provenance=invalid_revision,
+        )
 
 
 def test_forward_reverse_mean_is_orientation_invariant() -> None:
@@ -120,6 +145,41 @@ def test_overlength_policy_never_silently_truncates() -> None:
     ).embed((window,))
     assert chunked.values.shape == (1, 5)
     assert chunked.provenance.overlength_policy is OverlengthPolicy.CHUNK_MEAN
+
+
+def test_overlapping_chunk_pooling_is_fail_visible_as_a_context_heuristic() -> None:
+    class AdenineFractionBackend:
+        def encode(
+            self,
+            sequences: Sequence[str],
+            config: HFGenomeEncoderConfig,
+        ) -> np.ndarray:
+            del config
+            return np.asarray(
+                [[sequence.count("A") / len(sequence)] for sequence in sequences],
+                dtype=float,
+            )
+
+    sequence = "CCCCCCCCAAAAAAAACCCCCCCC"
+    result = HFGenomeEmbedder(
+        config(
+            overlength_policy=OverlengthPolicy.CHUNK_MEAN,
+            maximum_bases=16,
+            chunk_overlap_bases=8,
+        ),
+        backend=AdenineFractionBackend(),
+    ).embed((SequenceWindow(sequence_id="overlap-counterexample", sequence=sequence),))
+
+    assert result.values[0, 0] == pytest.approx(0.5)
+    assert result.values[0, 0] != pytest.approx(sequence.count("A") / len(sequence))
+    assert result.provenance.warnings == ("overlapping_chunk_pooling_is_a_context_heuristic",)
+    forged = result.provenance.model_copy(update={"warnings": ()})
+    with pytest.raises(ValidationError, match="context-heuristic warning"):
+        EmbeddingBatch(
+            sequence_ids=result.sequence_ids,
+            values=result.values,
+            provenance=forged,
+        )
 
 
 def test_variant_embedding_returns_alternate_minus_reference() -> None:

@@ -1,4 +1,7 @@
+from datetime import UTC, datetime
+
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import pytest
 from pydantic import ValidationError
@@ -6,6 +9,7 @@ from pydantic import ValidationError
 from rejuvenationkit import EffectDirection, Modality
 from rejuvenationkit.genomics import (
     FeatureEffect,
+    FeatureEffectBatch,
     FeatureNamespace,
     GeneSignature,
     GenomicFeature,
@@ -13,10 +17,13 @@ from rejuvenationkit.genomics import (
     GenomicMatrix,
     GenomicMatrixProvenance,
     GenomicSample,
+    IncompletePairPolicy,
     MatrixScale,
     MissingFeaturePolicy,
     SignatureContrastConfig,
+    SignatureContrastMode,
     SignatureFeature,
+    SignatureTimeWindow,
     aggregate_feature_effects,
     estimate_signature_contrast,
     estimate_signature_contrasts,
@@ -92,10 +99,11 @@ def test_weighted_signature_score_is_hand_computable() -> None:
     assert scores.scores[0].score == pytest.approx(0.0)
     assert scores.scores[1].score == pytest.approx(0.5)
     assert scores.scores[3].score == pytest.approx(-1.0)
-    assert scores.to_frame().shape == (6, 5)
+    assert scores.to_frame().shape == (6, 6)
     assert scores.matrix_provenance_id == "synthetic-canine-rna"
     assert scores.matrix_scale == "normalized_expression"
     assert len(scores.signature_fingerprint) == 64
+    assert scores.matrix_artifact_hash == matrix().artifact_hash
 
 
 def test_signature_missing_feature_policies_are_explicit() -> None:
@@ -225,6 +233,95 @@ def test_subject_cluster_bootstrap_is_deterministic_and_converts_to_evidence() -
     assert evidence.correlation_group == "shared-rna-samples"
 
 
+def longitudinal_matrix() -> GenomicMatrix:
+    source = matrix()
+    baseline = datetime(2026, 1, 1, tzinfo=UTC)
+    followup = datetime(2026, 6, 1, tzinfo=UTC)
+    offsets = (0.0, 0.1, -0.1, -1.0, -0.8, -1.2)
+    samples: list[GenomicSample] = []
+    values: list[npt.NDArray[np.float64]] = []
+    for index, (sample, offset) in enumerate(zip(source.samples, offsets, strict=True)):
+        samples.extend(
+            (
+                sample.model_copy(
+                    update={"sample_id": f"dog-{index}-baseline", "timestamp": baseline}
+                ),
+                sample.model_copy(
+                    update={"sample_id": f"dog-{index}-followup", "timestamp": followup}
+                ),
+            )
+        )
+        values.append(source.dense_values()[index])
+        changed = source.dense_values()[index].copy()
+        changed[0] += offset
+        values.append(changed)
+    return GenomicMatrix(
+        values=np.asarray(values),
+        samples=tuple(samples),
+        features=source.features,
+        scale=source.scale,
+        provenance=source.provenance,
+    )
+
+
+def paired_config(**updates: object) -> SignatureContrastConfig:
+    values: dict[str, object] = {
+        "treated_cohort": "treated",
+        "control_cohort": "control",
+        "bootstrap_iterations": 500,
+        "random_seed": 17,
+        "mode": SignatureContrastMode.PAIRED_CHANGE,
+        "baseline_window": SignatureTimeWindow(
+            start=datetime(2025, 12, 15, tzinfo=UTC),
+            end=datetime(2026, 1, 15, tzinfo=UTC),
+        ),
+        "followup_window": SignatureTimeWindow(
+            start=datetime(2026, 5, 15, tzinfo=UTC),
+            end=datetime(2026, 6, 15, tzinfo=UTC),
+        ),
+        "time_contrast": "month-5-minus-baseline",
+    }
+    values.update(updates)
+    return SignatureContrastConfig.model_validate(values)
+
+
+def test_longitudinal_signature_contrast_requires_explicit_windows() -> None:
+    scores = score_weighted_signature(longitudinal_matrix(), signature())
+    with pytest.raises(ValueError, match="paired_change"):
+        estimate_signature_contrast(
+            scores,
+            signature(),
+            SignatureContrastConfig(treated_cohort="treated", control_cohort="control"),
+        )
+
+    result = estimate_signature_contrast(scores, signature(), paired_config())
+
+    assert result.estimate == pytest.approx(-0.25)
+    assert result.time_contrast == "month-5-minus-baseline"
+    assert result.excluded_subject_ids == ()
+    assert result.treated_subjects == 3
+    assert result.control_subjects == 3
+
+
+def test_longitudinal_signature_contrast_audits_incomplete_pairs() -> None:
+    source = longitudinal_matrix()
+    kept = tuple(item for item in source.sample_ids if item != "dog-5-followup")
+    scores = score_weighted_signature(source.subset_samples(kept), signature())
+    with pytest.raises(ValueError, match="lacks a sample"):
+        estimate_signature_contrast(scores, signature(), paired_config())
+
+    result = estimate_signature_contrast(
+        scores,
+        signature(),
+        paired_config(
+            minimum_subjects_per_group=2,
+            incomplete_pair_policy=IncompletePairPolicy.EXCLUDE,
+        ),
+    )
+    assert result.excluded_subject_ids == ("dog-5",)
+    assert "incomplete_longitudinal_pairs_excluded" in result.warnings
+
+
 def test_joint_signature_bootstrap_preserves_subject_covariance() -> None:
     first_signature = signature()
     second_signature = first_signature.model_copy(
@@ -339,6 +436,136 @@ def test_feature_effect_aggregation_propagates_covariance() -> None:
     assert correlated.uncertainty_method == "correlation_aware_delta_method"
 
 
+def test_feature_covariance_validation_is_scale_invariant() -> None:
+    effects = tuple(item.model_copy(update={"standard_error": 1e-6}) for item in feature_effects())
+    asymmetric = pd.DataFrame(
+        ((1e-12, 9e-13, 0.0), (0.0, 1e-12, 0.0), (0.0, 0.0, 1e-12)),
+        index=("g1", "g2", "g3"),
+        columns=("g1", "g2", "g3"),
+    )
+    with pytest.raises(ValueError, match="symmetric relative"):
+        aggregate_feature_effects(effects, signature(), covariance=asymmetric)
+
+    impossible_correlation = pd.DataFrame(
+        ((1e-12, 2e-12, 0.0), (2e-12, 1e-12, 0.0), (0.0, 0.0, 1e-12)),
+        index=("g1", "g2", "g3"),
+        columns=("g1", "g2", "g3"),
+    )
+    with pytest.raises(ValueError, match="positive semidefinite"):
+        aggregate_feature_effects(effects, signature(), covariance=impossible_correlation)
+
+
+def test_feature_effect_batch_preserves_estimand_and_independent_subject_context() -> None:
+    effects = feature_effects()
+    batch = FeatureEffectBatch(
+        effects=effects,
+        contrast="rapamycin-minus-control",
+        estimand_population="older-dogs-randomized",
+        time_contrast="week-24-minus-baseline",
+        treated_subjects=30,
+        control_subjects=28,
+        independent_subject_definition="one randomized dog",
+        design_formula="~ baseline + treatment",
+        covariates=("baseline",),
+        normalization_method="DESeq2 median-of-ratios",
+        inference_method="DESeq2 Wald",
+        inference_version="1.42.0",
+        tested_feature_ids=("g1", "g2", "g3", "g4"),
+        multiple_testing_method="Benjamini-Hochberg",
+        effect_provenance_id="deseq2-analysis-v1",
+        provenance_id="deseq2-analysis-v1:design-frozen",
+    )
+
+    estimate = aggregate_feature_effects(batch, signature())
+
+    assert estimate.estimand_population == "older-dogs-randomized"
+    assert estimate.time_contrast == "week-24-minus-baseline"
+    assert estimate.treated_subjects == 30
+    assert estimate.control_subjects == 28
+    assert "feature_effect_context_not_supplied" not in estimate.warnings
+    assert batch.artifact_hash in estimate.provenance_id
+    reordered = batch.model_copy(
+        update={
+            "effects": tuple(reversed(batch.effects)),
+            "tested_feature_ids": tuple(reversed(batch.tested_feature_ids)),
+            "covariates": tuple(reversed(batch.covariates)),
+        }
+    )
+    assert reordered.artifact_hash == batch.artifact_hash
+
+
+def test_feature_effect_batch_rejects_effects_outside_tested_universe() -> None:
+    with pytest.raises(ValidationError, match="tested feature universe"):
+        FeatureEffectBatch(
+            effects=feature_effects(),
+            contrast="rapamycin-minus-control",
+            estimand_population="randomized-dogs",
+            time_contrast="followup-minus-baseline",
+            treated_subjects=3,
+            control_subjects=3,
+            independent_subject_definition="one dog",
+            design_formula="~ treatment",
+            normalization_method="DESeq2",
+            inference_method="Wald",
+            inference_version="1",
+            tested_feature_ids=("g1", "g2"),
+            multiple_testing_method="BH",
+            effect_provenance_id="deseq2-analysis-v1",
+            provenance_id="analysis",
+        )
+
+
+def test_feature_effect_batch_binds_contrast_and_parent_provenance() -> None:
+    """A batch cannot relabel effects from another contrast or upstream analysis."""
+    common = {
+        "effects": feature_effects(),
+        "estimand_population": "randomized-dogs",
+        "time_contrast": "followup-minus-baseline",
+        "treated_subjects": 3,
+        "control_subjects": 3,
+        "independent_subject_definition": "one dog",
+        "design_formula": "~ treatment",
+        "normalization_method": "DESeq2",
+        "inference_method": "Wald",
+        "inference_version": "1",
+        "tested_feature_ids": ("g1", "g2", "g3"),
+        "multiple_testing_method": "BH",
+        "provenance_id": "analysis",
+    }
+    with pytest.raises(ValidationError, match="batch contrast"):
+        FeatureEffectBatch.model_validate(
+            {
+                **common,
+                "contrast": "different-contrast",
+                "effect_provenance_id": "deseq2-analysis-v1",
+            }
+        )
+    with pytest.raises(ValidationError, match="effect_provenance_id"):
+        FeatureEffectBatch.model_validate(
+            {
+                **common,
+                "contrast": "rapamycin-minus-control",
+                "effect_provenance_id": "different-analysis",
+            }
+        )
+
+
+def test_feature_effect_aggregation_provenance_binds_signature_definition() -> None:
+    """Changing signature weights changes downstream provenance even at one version."""
+    original = aggregate_feature_effects(feature_effects(), signature())
+    changed_signature = signature().model_copy(
+        update={
+            "features": (
+                SignatureFeature(feature_id="g1", weight=2),
+                SignatureFeature(feature_id="g2", weight=-2),
+                SignatureFeature(feature_id="g3", weight=1),
+            )
+        }
+    )
+    changed = aggregate_feature_effects(feature_effects(), changed_signature)
+    assert original.provenance_id != changed.provenance_id
+
+
 def test_read_feature_effects_uses_explicit_column_mapping() -> None:
     frame = pd.DataFrame(
         {
@@ -397,6 +624,23 @@ def test_read_feature_effects_uses_explicit_column_mapping() -> None:
             tissue="blood",
             provenance_id="analysis",
         )
+    missing_identifier = frame.copy()
+    missing_identifier.loc[0, "gene"] = None
+    with pytest.raises(ValueError, match="identifiers cannot be missing"):
+        read_feature_effects(
+            missing_identifier,
+            feature_id_column="gene",
+            effect_column="lfc",
+            standard_error_column="lfc_se",
+            feature_type=GenomicFeatureType.GENE,
+            namespace=FeatureNamespace.ENSEMBL,
+            modality=Modality.TRANSCRIPTOMICS,
+            contrast="contrast",
+            effect_unit="log2_fold_change",
+            species_taxon_id=9615,
+            tissue="blood",
+            provenance_id="analysis",
+        )
 
 
 def test_signature_and_effect_models_reject_invalid_definitions() -> None:
@@ -425,6 +669,20 @@ def test_signature_and_effect_models_reject_invalid_definitions() -> None:
     with pytest.raises(ValidationError, match="finite"):
         feature_effects()[0].model_copy(update={"effect": float("nan")}).model_validate(
             feature_effects()[0].model_copy(update={"effect": float("nan")}).model_dump()
+        )
+    with pytest.raises(ValidationError, match="incompatible"):
+        FeatureEffect(
+            feature_id="P42345",
+            feature_type=GenomicFeatureType.GENE,
+            namespace=FeatureNamespace.UNIPROT,
+            modality=Modality.PROTEOMICS,
+            contrast="rapamycin-minus-control",
+            effect=0.5,
+            standard_error=0.1,
+            effect_unit="log_fold_change",
+            species_taxon_id=9615,
+            tissue="blood",
+            provenance_id="upstream-model",
         )
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from rejuvenationkit.detection import (  # noqa: E402
     ChangeDetectionReport,
     SubjectChangeDetection,
 )
+from rejuvenationkit.longitudinal import AggregationPolicy  # noqa: E402
 from rejuvenationkit.schemas import Modality  # noqa: E402
 from rejuvenationkit.sequential import (  # noqa: E402
     ModalityEvidence,
@@ -38,6 +40,9 @@ def report() -> ChangeDetectionReport:
     model = ChangeDetectionModel(
         feature_names=("albumin", "ethanolamine"),
         feature_modalities=(None, None),
+        resolved_feature_modalities=(Modality.CLINICAL, Modality.METABOLOMICS),
+        feature_units=("g/dL", "umol/L"),
+        aggregation_policies=(AggregationPolicy.MEAN, AggregationPolicy.MEDIAN),
         reference_subjects=30,
         mean_change=(0, 0),
         covariance=((1.0, 0.5), (0.5, 1.0)),
@@ -49,8 +54,8 @@ def report() -> ChangeDetectionReport:
             subject_id="dog-1",
             change=(1, 1),
             innovation=(1, 1),
-            whitened_innovation=(1, 0.5),
-            squared_mahalanobis_distance=1.25,
+            whitened_innovation=(1, 0.5773502691896258),
+            squared_mahalanobis_distance=1.3333333333333335,
             empirical_tail_probability=0.5,
             detected=False,
         ),
@@ -58,8 +63,8 @@ def report() -> ChangeDetectionReport:
             subject_id="dog-2",
             change=(3, 3),
             innovation=(3, 3),
-            whitened_innovation=(3, 1),
-            squared_mahalanobis_distance=10,
+            whitened_innovation=(3, 1.7320508075688774),
+            squared_mahalanobis_distance=12,
             empirical_tail_probability=0.03,
             detected=True,
         ),
@@ -90,6 +95,28 @@ def test_save_detection_figures(report: ChangeDetectionReport, tmp_path: Path) -
     assert all(path.stat().st_size > 0 for path in paths)
 
 
+def test_detection_figures_handle_all_evaluation_subjects_excluded(
+    report: ChangeDetectionReport,
+    tmp_path: Path,
+) -> None:
+    empty = report.model_copy(update={"results": (), "excluded_subject_ids": ("dog-1", "dog-2")})
+
+    paths = save_detection_figures(empty, tmp_path, prefix="empty", dpi=72)
+
+    assert len(paths) == 4
+    assert all(path.stat().st_size > 0 for path in paths)
+
+
+def test_detection_channel_labels_include_unit_and_aggregation(
+    report: ChangeDetectionReport,
+) -> None:
+    figure = plot_covariance_structure(report)
+
+    labels = [item.get_text() for item in figure.axes[0].get_xticklabels()]
+    assert "clinical:albumin [g/dL; mean]" in labels
+    assert "metabolomics:ethanolamine [umol/L; median]" in labels
+
+
 def test_visualization_rejects_invalid_requests(report: ChangeDetectionReport) -> None:
     with pytest.raises(ValueError, match="distinct"):
         plot_whitened_innovations(report, components=(0, 0))
@@ -99,9 +126,13 @@ def test_visualization_rejects_invalid_requests(report: ChangeDetectionReport) -
 
 @pytest.fixture
 def sequential_report() -> SequentialDetectionReport:
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     model = SequentialDetectionModel(
         feature_names=("activity", "ethanolamine"),
         feature_modalities=(Modality.WEARABLE, Modality.METABOLOMICS),
+        resolved_feature_modalities=(Modality.WEARABLE, Modality.METABOLOMICS),
+        feature_units=("counts/day", "umol/L"),
+        aggregation_policies=(AggregationPolicy.MEAN, AggregationPolicy.MEDIAN),
         reference_subjects=30,
         reference_transitions=60,
         mean_change_per_year=(0, 0),
@@ -120,6 +151,8 @@ def sequential_report() -> SequentialDetectionReport:
                     SequentialDetectionPoint(
                         from_visit_id="baseline",
                         to_visit_id="year-1",
+                        from_observed_at=start,
+                        to_observed_at=start + timedelta(days=360),
                         elapsed_years=1,
                         interval_score=1,
                         cumulative_score=1,
@@ -129,6 +162,8 @@ def sequential_report() -> SequentialDetectionReport:
                     SequentialDetectionPoint(
                         from_visit_id="year-1",
                         to_visit_id="year-2",
+                        from_observed_at=start + timedelta(days=360),
+                        to_observed_at=start + timedelta(days=735),
                         elapsed_years=1,
                         interval_score=1,
                         cumulative_score=2,
@@ -149,6 +184,8 @@ def sequential_report() -> SequentialDetectionReport:
                     SequentialDetectionPoint(
                         from_visit_id="baseline",
                         to_visit_id="year-1",
+                        from_observed_at=start + timedelta(days=3),
+                        to_observed_at=start + timedelta(days=370),
                         elapsed_years=1,
                         interval_score=7,
                         cumulative_score=7,
@@ -158,6 +195,8 @@ def sequential_report() -> SequentialDetectionReport:
                     SequentialDetectionPoint(
                         from_visit_id="year-1",
                         to_visit_id="year-2",
+                        from_observed_at=start + timedelta(days=370),
+                        to_observed_at=start + timedelta(days=750),
                         elapsed_years=1,
                         interval_score=6,
                         cumulative_score=8,
@@ -191,6 +230,16 @@ def test_sequential_plot_functions_and_save(
     paths = save_sequential_figures(sequential_report, tmp_path, dpi=72)
     assert len(paths) == 3
     assert all(path.stat().st_size > 0 for path in paths)
+
+
+def test_sequential_trajectory_axis_uses_selected_observation_timestamps(
+    sequential_report: SequentialDetectionReport,
+) -> None:
+    figure = plot_sequential_trajectories(sequential_report)
+
+    assert figure.axes[0].get_xlabel() == "Selected observation timestamp"
+    first_line_x = figure.axes[0].lines[0].get_xdata(orig=True)
+    assert first_line_x[0] == datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def test_sequential_modality_plot_rejects_nonpositive_limit(

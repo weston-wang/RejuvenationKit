@@ -15,11 +15,16 @@ nav:
   - DAP audit case study: dap-audit-case-study.md
   - Multimodal fusion: multimodal-fusion.md
   - Covariance-aware fusion: covariance-aware-fusion.md
+  - Phase 2 architecture and use cases: phase-2-architecture-and-use-cases.md
   - Genome-scale data model: genomic-data-model.md
   - Genomic signatures: genomic-signatures.md
   - Cross-species genomics: cross-species-genomics.md
+  - External biology resources: external-biology-resources.md
   - Hugging Face genomics: huggingface-genomics.md
   - Public genomic benchmark: gse131754-genomic-benchmark.md
+  - Phase 3 state estimation: phase-3-state.md
+  - Phase 4 combination analysis: phase-4-combinations.md
+  - Four-phase workflow: four-phase-workflow.md
   - Public-data example: public-data-example.md
   - Canine public-data example: canine-public-data-example.md
   - Canine multimodal example: canine-multimodal-example.md
@@ -28,3 +33,11 @@ nav:
 plugins:
   - search
   - mkdocstrings
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js

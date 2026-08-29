@@ -5,10 +5,13 @@ RejuvenationKit welcomes small, testable contributions grounded in a real resear
 ## Development
 
 1. Use Python 3.11 or newer.
-2. Install `python -m pip install -e ".[dev,docs,visualization]"`.
+2. Install `python -m pip install -e ".[dev,docs,genomics,hts,visualization]"`.
 3. Install hooks with `pre-commit install`.
 4. Add or update tests for every behavior change.
 5. Run the local checks listed in the README.
+
+The optional Parquet path has a separate dependency boundary. Install `.[arrow]` and run
+`pytest --no-cov tests/test_genomic_chunked.py` when changing chunked import behavior.
 
 ## Scientific expectations
 

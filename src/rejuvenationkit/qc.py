@@ -4,14 +4,35 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from enum import StrEnum
 from statistics import fmean, variance
-from typing import Protocol
+from types import MappingProxyType
+from typing import Protocol, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from rejuvenationkit.schemas import Modality, Observation, Study, Subject
+
+QCScalar = str | int | float | bool
+_QCScalarT = TypeVar("_QCScalarT", bound=QCScalar)
+
+
+def _freeze_qc_mapping(
+    values: Mapping[str, _QCScalarT],
+    *,
+    field_name: str,
+) -> Mapping[str, _QCScalarT]:
+    """Defensively copy a result mapping and reject non-finite serialized values."""
+    copied: dict[str, _QCScalarT] = {}
+    for key, value in values.items():
+        if not key or key != key.strip():
+            raise ValueError(f"{field_name} keys must be nonblank without surrounding whitespace")
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(f"{field_name} float values must be finite")
+        copied[key] = value
+    return MappingProxyType(copied)
 
 
 class Severity(StrEnum):
@@ -36,7 +57,7 @@ class ExperimentalFactor(BaseModel):
     the corresponding subject attribute.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
 
     name: str = Field(min_length=1)
     source: FactorSource = FactorSource.ATTRIBUTE
@@ -85,7 +106,11 @@ class FeatureRule(BaseModel):
 
     @model_validator(mode="after")
     def validate_bounds(self) -> FeatureRule:
-        """Reject inverted feature ranges."""
+        """Reject non-finite or inverted feature ranges."""
+        if any(
+            bound is not None and not math.isfinite(bound) for bound in (self.minimum, self.maximum)
+        ):
+            raise ValueError("feature range bounds must be finite")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("minimum cannot exceed maximum")
         return self
@@ -94,7 +119,7 @@ class FeatureRule(BaseModel):
 class VisitFeature(BaseModel):
     """A feature expected within a scheduled visit window."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
 
     feature: str = Field(min_length=1)
     modality: Modality | None = None
@@ -108,7 +133,7 @@ class ExpectedVisit(BaseModel):
     selector is included.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
 
     visit_id: str = Field(min_length=1)
     scheduled_at: datetime | None = None
@@ -129,9 +154,27 @@ class ExpectedVisit(BaseModel):
             self.scheduled_at.tzinfo is None or self.scheduled_at.utcoffset() is None
         ):
             raise ValueError("scheduled_at must be timezone-aware")
-        keys = [(item.feature, item.modality) for item in self.required_features]
-        if len(keys) != len(set(keys)):
-            raise ValueError("visit required_features must be unique")
+        if self.scheduled_at is not None and self.offset != timedelta(0):
+            raise ValueError("offset is only valid for an anchor-relative expected visit")
+        for label, values in (("subject_ids", self.subject_ids), ("cohorts", self.cohorts)):
+            if len(values) != len(set(values)):
+                raise ValueError(f"expected-visit {label} must be unique")
+            if any(not value or value != value.strip() for value in values):
+                raise ValueError(
+                    f"expected-visit {label} must be nonblank without surrounding whitespace"
+                )
+        for index, first in enumerate(self.required_features):
+            for second in self.required_features[index + 1 :]:
+                if first.feature != second.feature:
+                    continue
+                if (
+                    first.modality is None
+                    or second.modality is None
+                    or first.modality is second.modality
+                ):
+                    raise ValueError(
+                        "visit required_features cannot overlap by exact or wildcard modality"
+                    )
         return self
 
     def scheduled_for(self, subject: Subject) -> datetime | None:
@@ -177,7 +220,7 @@ class ExpectedVisit(BaseModel):
 class QCConfig(BaseModel):
     """Configuration for the baseline longitudinal QC pipeline."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
 
     feature_rules: tuple[FeatureRule, ...] = ()
     expected_visits: tuple[ExpectedVisit, ...] = ()
@@ -220,24 +263,62 @@ class QCConfig(BaseModel):
 class QCFinding(BaseModel):
     """A machine-readable quality-control finding."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
 
     code: str = Field(min_length=1)
     severity: Severity
     message: str = Field(min_length=1)
     subject_ids: tuple[str, ...] = ()
     observation_indices: tuple[int, ...] = ()
-    context: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    context: Mapping[str, QCScalar] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def freeze_context(self) -> QCFinding:
+        """Keep finding identities deterministic and context immutable."""
+        if tuple(sorted(set(self.subject_ids))) != self.subject_ids:
+            raise ValueError("QC finding subject identifiers must be unique and sorted")
+        if tuple(sorted(set(self.observation_indices))) != self.observation_indices or any(
+            index < 0 for index in self.observation_indices
+        ):
+            raise ValueError(
+                "QC finding observation indices must be nonnegative, unique, and sorted"
+            )
+        object.__setattr__(
+            self,
+            "context",
+            _freeze_qc_mapping(self.context, field_name="QC finding context"),
+        )
+        return self
+
+    @field_serializer("context")
+    def serialize_context(self, value: Mapping[str, QCScalar]) -> dict[str, QCScalar]:
+        """Serialize immutable context as ordinary JSON data."""
+        return dict(value)
 
 
 class QCReport(BaseModel):
     """Output of a longitudinal quality-control run."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
 
     study_id: str
     findings: tuple[QCFinding, ...]
-    metrics: dict[str, int | float] = Field(default_factory=dict)
+    metrics: Mapping[str, int | float] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def freeze_metrics(self) -> QCReport:
+        """Keep inventory metrics immutable and finite."""
+        object.__setattr__(
+            self,
+            "metrics",
+            _freeze_qc_mapping(self.metrics, field_name="QC report metrics"),
+        )
+        return self
+
+    @field_serializer("metrics")
+    def serialize_metrics(self, value: Mapping[str, int | float]) -> dict[str, int | float]:
+        """Serialize immutable metrics as ordinary JSON data."""
+        return dict(value)
 
     @property
     def passed(self) -> bool:
@@ -288,6 +369,7 @@ class BaselineLongitudinalQC:
             *self._check_values_and_ranges(study),
             *self._check_missingness(study),
             *self._check_expected_visits(study),
+            *self._check_cross_visit_observation_reuse(study),
             *self._check_temporal_order(study),
             *self._check_replicates(study),
             *self._check_batch_drift(study),
@@ -428,7 +510,7 @@ class BaselineLongitudinalQC:
                         matched[row.subject_id].add((requirement.feature, requirement.modality))
 
             fully_missing = tuple(
-                subject_id for subject_id, observed in matched.items() if not observed
+                sorted(subject_id for subject_id, observed in matched.items() if not observed)
             )
             if fully_missing:
                 finding = self._visit_missing_finding(
@@ -438,7 +520,7 @@ class BaselineLongitudinalQC:
                     eligible_subject_count=len(matched),
                     message=(
                         f"Visit {visit.visit_id!r} has no required measurements for "
-                        f"{len(fully_missing)}/{len(eligible_subjects)} subjects"
+                        f"{len(fully_missing)}/{len(matched)} schedulable subjects"
                     ),
                 )
                 if finding is not None:
@@ -447,9 +529,11 @@ class BaselineLongitudinalQC:
             for requirement in visit.required_features:
                 key = (requirement.feature, requirement.modality)
                 partially_missing = tuple(
-                    subject_id
-                    for subject_id, observed in matched.items()
-                    if observed and key not in observed
+                    sorted(
+                        subject_id
+                        for subject_id, observed in matched.items()
+                        if observed and key not in observed
+                    )
                 )
                 if not partially_missing:
                     continue
@@ -460,7 +544,7 @@ class BaselineLongitudinalQC:
                     eligible_subject_count=len(matched),
                     message=(
                         f"{requirement.feature} is missing at visit {visit.visit_id!r} for "
-                        f"{len(partially_missing)}/{len(eligible_subjects)} subjects"
+                        f"{len(partially_missing)}/{len(matched)} schedulable subjects"
                     ),
                     feature=requirement.feature,
                     modality=requirement.modality,
@@ -470,6 +554,47 @@ class BaselineLongitudinalQC:
 
         if self.config.check_observations_outside_visit_windows:
             findings.extend(self._check_observations_outside_visit_windows(study, subject_cohorts))
+        return findings
+
+    def _check_cross_visit_observation_reuse(self, study: Study) -> list[QCFinding]:
+        """Flag a finite source row eligible for more than one expected visit."""
+        subjects = {subject.subject_id: subject for subject in study.subjects}
+        findings: list[QCFinding] = []
+        for index, row in enumerate(study.observations):
+            if not math.isfinite(row.value):
+                continue
+            subject = subjects[row.subject_id]
+            matched_visit_ids = tuple(
+                visit.visit_id
+                for visit in self.config.expected_visits
+                if _visit_applies(visit, subject.subject_id, subject.cohort)
+                and (target := _visit_target(visit, subject)) is not None
+                and _inside_visit_window(row, visit, target)
+                and any(
+                    _matches_visit_feature(row, requirement)
+                    for requirement in visit.required_features
+                )
+            )
+            if len(matched_visit_ids) < 2:
+                continue
+            findings.append(
+                QCFinding(
+                    code="observation_reused_across_expected_visits",
+                    severity=Severity.ERROR,
+                    message=(
+                        f"{row.feature} observation at {row.timestamp.isoformat()} can satisfy "
+                        f"multiple expected visits: {', '.join(matched_visit_ids)}"
+                    ),
+                    subject_ids=(row.subject_id,),
+                    observation_indices=(index,),
+                    context={
+                        "feature": row.feature,
+                        "modality": row.modality.value,
+                        "visit_ids": ",".join(matched_visit_ids),
+                        "matched_visits": len(matched_visit_ids),
+                    },
+                )
+            )
         return findings
 
     def _visit_missing_finding(
@@ -495,6 +620,7 @@ class BaselineLongitudinalQC:
             "visit_id": visit.visit_id,
             "missing_fraction": fraction,
             "missing_subjects": len(subject_ids),
+            "schedulable_subjects": eligible_subject_count,
             "schedule": _visit_schedule_description(visit),
         }
         if feature is not None:
@@ -564,7 +690,7 @@ class BaselineLongitudinalQC:
             if nuisance.source is FactorSource.BATCH_ID and not self.config.check_batch_confounding:
                 continue
             strata: defaultdict[tuple[Modality, str], set[tuple[str, str]]] = defaultdict(set)
-            timepoint_records: set[tuple[str, str, str]] = set()
+            timepoint_levels: defaultdict[tuple[str, str], set[str]] = defaultdict(set)
             for row in study.observations:
                 level = _experimental_factor_level(
                     row,
@@ -574,15 +700,22 @@ class BaselineLongitudinalQC:
                 if level is None:
                     continue
                 strata[(row.modality, row.feature)].add((row.subject_id, level))
-                timepoint_records.update(
-                    (row.subject_id, visit_id, level)
-                    for visit_id in _matching_visit_ids(
-                        row,
-                        subject_lookup[row.subject_id],
-                        self.config.expected_visits,
-                    )
-                )
+                for visit_id in _matching_visit_ids(
+                    row,
+                    subject_lookup[row.subject_id],
+                    self.config.expected_visits,
+                ):
+                    timepoint_levels[(row.subject_id, visit_id)].add(level)
             for (modality, feature), assignments in strata.items():
+                levels_by_subject: defaultdict[str, set[str]] = defaultdict(set)
+                for subject_id, level in assignments:
+                    levels_by_subject[subject_id].add(level)
+                stable_assignments = tuple(
+                    (subject_id, next(iter(levels)))
+                    for subject_id, levels in sorted(levels_by_subject.items())
+                    if len(levels) == 1
+                )
+                changing_subjects = sum(len(levels) > 1 for levels in levels_by_subject.values())
                 assignment_factors: list[tuple[str, dict[str, str]]] = [
                     (
                         f"intervention:{intervention}",
@@ -592,7 +725,7 @@ class BaselineLongitudinalQC:
                                 if intervention in subject_lookup[subject_id].interventions
                                 else "unexposed"
                             )
-                            for subject_id, _ in assignments
+                            for subject_id, _ in stable_assignments
                         },
                     )
                     for intervention in interventions
@@ -602,7 +735,7 @@ class BaselineLongitudinalQC:
                         "cohort",
                         {
                             subject_id: subject_lookup[subject_id].cohort
-                            for subject_id, _ in assignments
+                            for subject_id, _ in stable_assignments
                         },
                     )
                 )
@@ -623,7 +756,9 @@ class BaselineLongitudinalQC:
                     if partition in seen_partitions:
                         continue
                     seen_partitions.add(partition)
-                    pairs = tuple((labels[subject_id], level) for subject_id, level in assignments)
+                    pairs = tuple(
+                        (labels[subject_id], level) for subject_id, level in stable_assignments
+                    )
                     finding = self._confounding_finding(
                         pairs=pairs,
                         nuisance=nuisance,
@@ -631,13 +766,25 @@ class BaselineLongitudinalQC:
                         subject_ids=tuple(sorted(labels)),
                         modality=modality,
                         feature=feature,
+                        unit_of_analysis="subject",
+                        excluded_changing_factor_subjects=changing_subjects,
                     )
                     if finding is not None:
                         findings.append(finding)
+            stable_timepoint_records = tuple(
+                (visit_id, next(iter(levels)))
+                for (_, visit_id), levels in sorted(timepoint_levels.items())
+                if len(levels) == 1
+            )
+            changing_timepoint_records = sum(
+                len(levels) > 1 for levels in timepoint_levels.values()
+            )
             timepoint_finding = self._confounding_finding(
-                pairs=tuple((visit_id, level) for _, visit_id, level in timepoint_records),
+                pairs=stable_timepoint_records,
                 nuisance=nuisance,
                 assignment_factor="timepoint",
+                unit_of_analysis="subject_visit",
+                excluded_changing_factor_records=changing_timepoint_records,
             )
             if timepoint_finding is not None:
                 findings.append(timepoint_finding)
@@ -652,6 +799,9 @@ class BaselineLongitudinalQC:
         subject_ids: tuple[str, ...] = (),
         modality: Modality | None = None,
         feature: str | None = None,
+        unit_of_analysis: str,
+        excluded_changing_factor_subjects: int = 0,
+        excluded_changing_factor_records: int = 0,
     ) -> QCFinding | None:
         assignment_counts = Counter(assignment for assignment, _ in pairs)
         nuisance_levels = {level for _, level in pairs}
@@ -686,6 +836,9 @@ class BaselineLongitudinalQC:
             "association": association,
             "nuisance_levels": len(nuisance_levels),
             "records": len(pairs),
+            "unit_of_analysis": unit_of_analysis,
+            "excluded_changing_factor_subjects": excluded_changing_factor_subjects,
+            "excluded_changing_factor_records": excluded_changing_factor_records,
         }
         if modality is not None:
             context["modality"] = modality.value

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
 from math import isfinite, sqrt
@@ -14,12 +15,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scipy import sparse
 
 from rejuvenationkit.evidence import (
+    CalibrationReference,
     EffectDirection,
     Estimand,
     EvidenceCovariance,
     EvidenceEstimate,
 )
-from rejuvenationkit.genomics.effects import FeatureEffect
+from rejuvenationkit.genomics.effects import FeatureEffect, FeatureEffectBatch
 from rejuvenationkit.genomics.schemas import FeatureNamespace, GenomicMatrix, MatrixScale
 from rejuvenationkit.schemas import Modality
 
@@ -30,6 +32,39 @@ class MissingFeaturePolicy(StrEnum):
     ERROR = "error"
     DROP_AND_RENORMALIZE = "drop_and_renormalize"
     IMPUTE_ZERO = "impute_zero"
+
+
+class SignatureContrastMode(StrEnum):
+    """How sample-level scores become one value per independent subject."""
+
+    CROSS_SECTIONAL = "cross_sectional"
+    PAIRED_CHANGE = "paired_change"
+
+
+class IncompletePairPolicy(StrEnum):
+    """Handling of subjects without both prespecified longitudinal windows."""
+
+    ERROR = "error"
+    EXCLUDE = "exclude"
+
+
+class SignatureTimeWindow(BaseModel):
+    """Inclusive, timezone-aware sample-selection window."""
+
+    model_config = ConfigDict(frozen=True)
+
+    start: datetime
+    end: datetime
+
+    @model_validator(mode="after")
+    def validate_window(self) -> Self:
+        """Require an ordered pair of timezone-aware timestamps."""
+        for value in (self.start, self.end):
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("signature time-window bounds must be timezone-aware")
+        if self.end < self.start:
+            raise ValueError("signature time-window end must not precede start")
+        return self
 
 
 class SignatureFeature(BaseModel):
@@ -92,6 +127,7 @@ class SignatureSampleScore(BaseModel):
     sample_id: str
     subject_id: str
     cohort: str | None
+    timestamp: datetime | None = None
     score: float
     observed_weight_fraction: float = Field(ge=0, le=1)
 
@@ -109,6 +145,7 @@ class SignatureScores(BaseModel):
     missing_feature_ids: tuple[str, ...]
     feature_coverage: float = Field(ge=0, le=1)
     matrix_content_hash: str
+    matrix_artifact_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     sample_assignment_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     matrix_provenance_id: str
     matrix_scale: str
@@ -135,6 +172,27 @@ class SignatureContrastConfig(BaseModel):
     covariance_shrinkage: float = Field(default=0.1, ge=0, le=1)
     estimand_population: str | None = None
     time_contrast: str | None = None
+    mode: SignatureContrastMode = SignatureContrastMode.CROSS_SECTIONAL
+    baseline_window: SignatureTimeWindow | None = None
+    followup_window: SignatureTimeWindow | None = None
+    incomplete_pair_policy: IncompletePairPolicy = IncompletePairPolicy.ERROR
+
+    @model_validator(mode="after")
+    def validate_longitudinal_policy(self) -> Self:
+        """Require explicit, non-overlapping windows for a claimed change estimand."""
+        if self.mode is SignatureContrastMode.CROSS_SECTIONAL:
+            if self.baseline_window is not None or self.followup_window is not None:
+                raise ValueError("time windows require paired_change mode")
+            if self.incomplete_pair_policy is not IncompletePairPolicy.ERROR:
+                raise ValueError("incomplete_pair_policy applies only to paired_change mode")
+            return self
+        if self.baseline_window is None or self.followup_window is None:
+            raise ValueError("paired_change mode requires baseline_window and followup_window")
+        if self.baseline_window.end >= self.followup_window.start:
+            raise ValueError("baseline and follow-up windows must be ordered and non-overlapping")
+        if self.time_contrast is None:
+            raise ValueError("paired_change mode requires a declared time_contrast")
+        return self
 
 
 class SignatureEstimate(BaseModel):
@@ -163,6 +221,7 @@ class SignatureEstimate(BaseModel):
     provenance_id: str
     species_taxon_id: int = Field(gt=0)
     tissue: str | None
+    excluded_subject_ids: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
     def to_evidence(
@@ -170,11 +229,22 @@ class SignatureEstimate(BaseModel):
         *,
         evidence_id: str,
         modality: Modality,
-        calibration_id: str,
+        calibration_id: str | None = None,
+        calibration_reference: CalibrationReference | None = None,
         assay_id: str | None = None,
         correlation_group: str | None = None,
     ) -> EvidenceEstimate:
         """Convert a calibrated signature result into evidence for Phase 2 fusion."""
+        resolved_calibration_id = calibration_id or (
+            calibration_reference.calibration_id if calibration_reference is not None else None
+        )
+        if resolved_calibration_id is None:
+            raise ValueError("calibration_id or calibration_reference is required")
+        if (
+            calibration_reference is not None
+            and calibration_reference.calibration_id != resolved_calibration_id
+        ):
+            raise ValueError("calibration_id and calibration_reference disagree")
         return EvidenceEstimate(
             evidence_id=evidence_id,
             modality=modality,
@@ -187,7 +257,8 @@ class SignatureEstimate(BaseModel):
             ),
             estimate=self.estimate,
             standard_error=self.standard_error,
-            calibration_id=calibration_id,
+            calibration_id=resolved_calibration_id,
+            calibration_reference=calibration_reference,
             provenance_id=self.provenance_id,
             tissue=self.tissue,
             species_taxon_id=self.species_taxon_id,
@@ -209,12 +280,14 @@ class SignatureContrastBatch(BaseModel):
     random_seed: int
     treated_subject_ids: tuple[str, ...]
     control_subject_ids: tuple[str, ...]
+    excluded_subject_ids: tuple[str, ...] = ()
 
     def to_evidence(
         self,
         *,
         modality: Modality,
-        calibration_id: str,
+        calibration_id: str | None = None,
+        calibration_reference: CalibrationReference | None = None,
         assay_id: str | None = None,
         correlation_group: str | None = None,
     ) -> tuple[tuple[EvidenceEstimate, ...], EvidenceCovariance]:
@@ -228,6 +301,7 @@ class SignatureContrastBatch(BaseModel):
                 evidence_id=item.signature_id,
                 modality=modality,
                 calibration_id=calibration_id,
+                calibration_reference=calibration_reference,
                 assay_id=assay_id,
                 correlation_group=correlation_group,
             )
@@ -321,6 +395,7 @@ def score_weighted_signature(
                 sample_id=sample.sample_id,
                 subject_id=sample.subject_id,
                 cohort=sample.cohort,
+                timestamp=sample.timestamp,
                 score=score,
                 observed_weight_fraction=observed_fraction,
             )
@@ -339,9 +414,12 @@ def score_weighted_signature(
         missing_feature_ids=missing,
         feature_coverage=coverage,
         matrix_content_hash=matrix.content_hash,
+        matrix_artifact_hash=matrix.artifact_hash,
         sample_assignment_hash=sha256(
             "|".join(
-                f"{item.sample_id}:{item.subject_id}:{item.cohort}" for item in matrix.samples
+                f"{item.sample_id}:{item.subject_id}:{item.cohort}:"
+                f"{item.timestamp.isoformat() if item.timestamp is not None else ''}"
+                for item in matrix.samples
             ).encode()
         ).hexdigest(),
         matrix_provenance_id=matrix.provenance.source_id,
@@ -366,8 +444,12 @@ def estimate_signature_contrast(
     if scores.signature_fingerprint != signature.fingerprint:
         raise ValueError("scores and signature definitions must match exactly")
     frame = scores.to_frame()
-    treated = _subject_means(frame.loc[frame["cohort"] == config.treated_cohort])
-    controls = _subject_means(frame.loc[frame["cohort"] == config.control_cohort])
+    treated, treated_excluded = _subject_values(
+        frame.loc[frame["cohort"] == config.treated_cohort], config
+    )
+    controls, control_excluded = _subject_values(
+        frame.loc[frame["cohort"] == config.control_cohort], config
+    )
     _reject_cohort_subject_overlap(treated, controls)
     if len(treated) < config.minimum_subjects_per_group:
         raise ValueError("treated cohort has too few independent subjects")
@@ -389,6 +471,10 @@ def estimate_signature_contrast(
     interval = tuple(float(value) for value in np.quantile(bootstrap, [alpha, 1 - alpha]))
     contrast = f"{config.treated_cohort}-minus-{config.control_cohort}"
     config_fingerprint = sha256(config.model_dump_json().encode()).hexdigest()
+    excluded = tuple(sorted((*treated_excluded, *control_excluded)))
+    warnings = list(scores.warnings)
+    if excluded:
+        warnings.append("incomplete_longitudinal_pairs_excluded")
     return SignatureEstimate(
         signature_id=signature.signature_id,
         signature_version=signature.version,
@@ -409,13 +495,14 @@ def estimate_signature_contrast(
         feature_coverage=scores.feature_coverage,
         uncertainty_method=f"subject_cluster_bootstrap:{config.bootstrap_iterations}",
         provenance_id=(
-            f"{scores.matrix_provenance_id}:{scores.matrix_content_hash}:"
+            f"{scores.matrix_provenance_id}:{scores.matrix_artifact_hash}:"
             f"{scores.sample_assignment_hash}:{scores.signature_fingerprint}:"
             f"config={config_fingerprint}"
         ),
-        warnings=scores.warnings,
+        warnings=tuple(warnings),
         species_taxon_id=scores.species_taxon_id,
         tissue=scores.tissue,
+        excluded_subject_ids=excluded,
     )
 
 
@@ -436,6 +523,7 @@ def estimate_signature_contrasts(
         raise ValueError("joint signature identifiers must be unique")
     treated_by_signature: list[pd.Series] = []
     control_by_signature: list[pd.Series] = []
+    excluded_by_signature: list[tuple[str, ...]] = []
     for scores, signature in inputs:
         if (scores.signature_id, scores.signature_version) != (
             signature.signature_id,
@@ -445,8 +533,12 @@ def estimate_signature_contrasts(
         if scores.signature_fingerprint != signature.fingerprint:
             raise ValueError("scores and signature definitions must match exactly")
         frame = scores.to_frame()
-        treated = _subject_means(frame.loc[frame["cohort"] == config.treated_cohort])
-        controls = _subject_means(frame.loc[frame["cohort"] == config.control_cohort])
+        treated, treated_excluded = _subject_values(
+            frame.loc[frame["cohort"] == config.treated_cohort], config
+        )
+        controls, control_excluded = _subject_values(
+            frame.loc[frame["cohort"] == config.control_cohort], config
+        )
         _reject_cohort_subject_overlap(treated, controls)
         if len(treated) < config.minimum_subjects_per_group:
             raise ValueError("treated cohort has too few independent subjects")
@@ -454,6 +546,7 @@ def estimate_signature_contrasts(
             raise ValueError("control cohort has too few independent subjects")
         treated_by_signature.append(treated)
         control_by_signature.append(controls)
+        excluded_by_signature.append(tuple(sorted((*treated_excluded, *control_excluded))))
 
     treated_ids = tuple(str(value) for value in treated_by_signature[0].index)
     control_ids = tuple(str(value) for value in control_by_signature[0].index)
@@ -469,6 +562,8 @@ def estimate_signature_contrasts(
     )
     if control_mismatch:
         raise ValueError("joint signatures must contain identical control subjects in one order")
+    if any(item != excluded_by_signature[0] for item in excluded_by_signature):
+        raise ValueError("joint signatures must exclude identical longitudinal subjects")
 
     treated_values = np.vstack([series.to_numpy(dtype=float) for series in treated_by_signature])
     control_values = np.vstack([series.to_numpy(dtype=float) for series in control_by_signature])
@@ -499,6 +594,9 @@ def estimate_signature_contrasts(
 
     estimates: list[SignatureEstimate] = []
     for item_index, (scores, signature) in enumerate(inputs):
+        item_warnings = list(scores.warnings)
+        if excluded_by_signature[item_index]:
+            item_warnings.append("incomplete_longitudinal_pairs_excluded")
         estimates.append(
             SignatureEstimate(
                 signature_id=signature.signature_id,
@@ -525,19 +623,20 @@ def estimate_signature_contrasts(
                     f"joint_subject_cluster_bootstrap:{config.bootstrap_iterations}"
                 ),
                 provenance_id=(
-                    f"{scores.matrix_provenance_id}:{scores.matrix_content_hash}:"
+                    f"{scores.matrix_provenance_id}:{scores.matrix_artifact_hash}:"
                     f"{scores.sample_assignment_hash}:{scores.signature_fingerprint}:"
                     f"config={config_fingerprint}"
                 ),
-                warnings=scores.warnings,
+                warnings=tuple(item_warnings),
                 species_taxon_id=scores.species_taxon_id,
                 tissue=scores.tissue,
+                excluded_subject_ids=excluded_by_signature[item_index],
             )
         )
     evidence_ids = tuple(item.signature_id for item in estimates)
     input_fingerprint = sha256(
         "|".join(
-            f"{scores.matrix_content_hash}:{scores.sample_assignment_hash}:"
+            f"{scores.matrix_artifact_hash}:{scores.sample_assignment_hash}:"
             f"{scores.signature_fingerprint}"
             for scores, _ in inputs
         ).encode()
@@ -560,11 +659,12 @@ def estimate_signature_contrasts(
         random_seed=config.random_seed,
         treated_subject_ids=treated_ids,
         control_subject_ids=control_ids,
+        excluded_subject_ids=excluded_by_signature[0],
     )
 
 
 def aggregate_feature_effects(
-    effects: tuple[FeatureEffect, ...],
+    effects: tuple[FeatureEffect, ...] | FeatureEffectBatch,
     signature: GeneSignature,
     *,
     covariance: pd.DataFrame | None = None,
@@ -577,12 +677,20 @@ def aggregate_feature_effects(
         raise ValueError("minimum_feature_coverage must lie in (0, 1]")
     if not 0 < confidence_level < 1:
         raise ValueError("confidence_level must lie in (0, 1)")
-    if not effects:
+    effect_batch: FeatureEffectBatch | None
+    effect_values: tuple[FeatureEffect, ...]
+    if isinstance(effects, FeatureEffectBatch):
+        effect_batch = effects
+        effect_values = effects.effects
+    else:
+        effect_batch = None
+        effect_values = effects
+    if not effect_values:
         raise ValueError("feature effects cannot be empty")
-    identifiers = [item.feature_id for item in effects]
+    identifiers = [item.feature_id for item in effect_values]
     if len(set(identifiers)) != len(identifiers):
         raise ValueError("feature-effect identifiers must be unique")
-    reference = effects[0]
+    reference = effect_values[0]
     compatibility = {
         (
             item.feature_type,
@@ -595,7 +703,7 @@ def aggregate_feature_effects(
             item.genome_assembly,
             item.provenance_id,
         )
-        for item in effects
+        for item in effect_values
     }
     if len(compatibility) != 1:
         raise ValueError(
@@ -610,7 +718,7 @@ def aggregate_feature_effects(
         raise ValueError("feature effects and signature species must match")
     if signature.tissue is not None and reference.tissue != signature.tissue:
         raise ValueError("feature effects and signature tissues must match")
-    lookup = {item.feature_id: item for item in effects}
+    lookup = {item.feature_id: item for item in effect_values}
     matched = tuple(item for item in signature.features if item.feature_id in lookup)
     missing = tuple(item.feature_id for item in signature.features if item.feature_id not in lookup)
     total_weight = sum(abs(item.weight) for item in signature.features)
@@ -637,23 +745,24 @@ def aggregate_feature_effects(
                 "feature covariance labels must exactly match included signature features"
             )
         matrix = covariance.loc[expected, expected].to_numpy(dtype=float)
-        if not np.isfinite(matrix).all() or not np.allclose(matrix, matrix.T):
-            raise ValueError("feature covariance must be finite and symmetric")
-        covariance_scale = float(np.max(np.diag(matrix)))
-        if covariance_scale <= 0:
+        if not np.isfinite(matrix).all():
+            raise ValueError("feature covariance must be finite")
+        marginal_variances = np.diag(matrix)
+        if np.any(marginal_variances <= 0):
             raise ValueError("feature covariance diagonal must be positive")
-        if float(np.linalg.eigvalsh(matrix / covariance_scale)[0]) < -1e-10:
+        marginal_errors = np.sqrt(marginal_variances)
+        standardized = matrix / np.outer(marginal_errors, marginal_errors)
+        if not np.allclose(standardized, standardized.T, rtol=1e-10, atol=1e-12):
+            raise ValueError("feature covariance must be symmetric relative to its marginal scales")
+        if float(np.linalg.eigvalsh(standardized)[0]) < -1e-10:
             raise ValueError("feature covariance must be positive semidefinite")
         reported = np.asarray([item.standard_error**2 for item in matched_effects])
-        if not np.allclose(
-            np.diag(matrix),
-            reported,
-            rtol=1e-6,
-            atol=1e-12 * float(np.max(reported)),
-        ):
+        if np.any(np.abs(marginal_variances - reported) / reported > 1e-6):
             raise ValueError("feature covariance diagonal must match reported standard errors")
         uncertainty_method = "correlation_aware_delta_method"
         warnings = []
+    if effect_batch is None:
+        warnings.append("feature_effect_context_not_supplied")
     estimate = float(weights @ observed)
     variance = float(weights @ matrix @ weights)
     if variance <= 0:
@@ -666,8 +775,10 @@ def aggregate_feature_effects(
         signature_id=signature.signature_id,
         signature_version=signature.version,
         contrast=reference.contrast,
-        estimand_population=reference.contrast,
-        time_contrast=None,
+        estimand_population=(
+            effect_batch.estimand_population if effect_batch is not None else reference.contrast
+        ),
+        time_contrast=effect_batch.time_contrast if effect_batch is not None else None,
         estimate=estimate,
         standard_error=standard_error,
         confidence_level=confidence_level,
@@ -678,23 +789,68 @@ def aggregate_feature_effects(
         target_name=signature.target_name,
         target_unit=signature.target_unit,
         direction=signature.direction,
-        treated_subjects=0,
-        control_subjects=0,
+        treated_subjects=effect_batch.treated_subjects if effect_batch is not None else 0,
+        control_subjects=effect_batch.control_subjects if effect_batch is not None else 0,
         matched_feature_ids=tuple(item.feature_id for item in matched),
         missing_feature_ids=missing,
         feature_coverage=coverage,
         uncertainty_method=uncertainty_method,
-        provenance_id=(f"{reference.provenance_id}:{signature.signature_id}:{signature.version}"),
+        provenance_id=(
+            f"{effect_batch.provenance_id}:{effect_batch.artifact_hash}:"
+            f"signature={signature.fingerprint}"
+            if effect_batch is not None
+            else f"{reference.provenance_id}:signature={signature.fingerprint}"
+        ),
         warnings=tuple(warnings),
         species_taxon_id=signature.species_taxon_id,
         tissue=reference.tissue,
     )
 
 
-def _subject_means(frame: pd.DataFrame) -> pd.Series:
+def _subject_values(
+    frame: pd.DataFrame,
+    config: SignatureContrastConfig,
+) -> tuple[pd.Series, tuple[str, ...]]:
+    """Resolve exactly one cross-sectional value or paired change per subject."""
     if frame.empty:
-        return pd.Series(dtype=float)
-    return frame.groupby("subject_id", sort=True)["score"].mean()
+        return pd.Series(dtype=float), ()
+    if config.mode is SignatureContrastMode.CROSS_SECTIONAL:
+        for subject_id, rows in frame.groupby("subject_id", sort=True):
+            timestamps = rows["timestamp"]
+            if timestamps.isna().any() and timestamps.notna().any():
+                raise ValueError(f"subject {subject_id} mixes dated and undated signature samples")
+            if timestamps.dropna().nunique() > 1:
+                raise ValueError(
+                    "repeated longitudinal signature samples require paired_change mode; "
+                    f"subject {subject_id} has multiple timestamps"
+                )
+        return frame.groupby("subject_id", sort=True)["score"].mean(), ()
+
+    baseline = config.baseline_window
+    followup = config.followup_window
+    if baseline is None or followup is None:
+        raise RuntimeError("paired-change windows were not validated")
+    if frame["timestamp"].isna().any():
+        raise ValueError("paired_change mode requires a timestamp for every signature sample")
+    values: dict[str, float] = {}
+    excluded: list[str] = []
+    for subject_id, rows in frame.groupby("subject_id", sort=True):
+        timestamps = pd.to_datetime(rows["timestamp"], utc=True)
+        baseline_rows = rows.loc[
+            (timestamps >= baseline.start) & (timestamps <= baseline.end), "score"
+        ]
+        followup_rows = rows.loc[
+            (timestamps >= followup.start) & (timestamps <= followup.end), "score"
+        ]
+        if baseline_rows.empty or followup_rows.empty:
+            if config.incomplete_pair_policy is IncompletePairPolicy.ERROR:
+                raise ValueError(
+                    f"subject {subject_id} lacks a sample in both longitudinal windows"
+                )
+            excluded.append(str(subject_id))
+            continue
+        values[str(subject_id)] = float(followup_rows.mean() - baseline_rows.mean())
+    return pd.Series(values, dtype=float).sort_index(), tuple(sorted(excluded))
 
 
 def _reject_cohort_subject_overlap(treated: pd.Series, controls: pd.Series) -> None:

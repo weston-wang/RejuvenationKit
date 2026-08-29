@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 
 from rejuvenationkit import (
+    AssignmentMechanism,
     ExpectedVisit,
     Modality,
     Observation,
@@ -82,6 +83,7 @@ def main() -> None:
     report = RandomizedTreatmentEffectEvaluator(
         TreatmentEffectConfig(
             features=FEATURES,
+            assignment_mechanism=AssignmentMechanism.RANDOMIZED,
             cross_validation_folds=5,
             permutations=999,
             bootstrap_samples=999,

@@ -20,9 +20,17 @@ All policies still enforce `minimum_feature_coverage`. Missingness produces warn
 into downstream evidence. `minimum_sample_coverage` prevents a single observed gene from being
 renormalized into a complete score.
 
-`estimate_signature_contrast(...)` aggregates repeated samples within subjects and bootstraps
-subjects within treated and control groups. This avoids treating cells, genes, repeated aliquots,
-or embedding dimensions as independent animals.
+For a cross-sectional contrast, `estimate_signature_contrast(...)` permits technical replicates
+only at one timestamp per subject, aggregates them, and bootstraps independent subjects within
+treated and control groups. If a subject has multiple biological timepoints, the analysis fails
+closed rather than silently averaging baseline and follow-up.
+
+Longitudinal change requires `SignatureContrastMode.PAIRED_CHANGE`, timezone-aware non-overlapping
+baseline and follow-up windows, and an explicit `time_contrast`. Each subject contributes its
+follow-up-minus-baseline score. Incomplete pairs either raise or are excluded under an explicit
+policy, with subject IDs and warnings retained in the result. Matrix artifact identity—not merely
+the numerical values—enters contrast and covariance provenance. This avoids treating cells, genes,
+repeated aliquots, timepoints, or embedding dimensions as independent animals.
 
 `estimate_signature_contrasts(...)` resamples the same subject indices across several signatures,
 returns their joint covariance, and converts estimates plus covariance into the evidence API in one
@@ -38,6 +46,12 @@ a genuinely common estimand after calibration.
 
 `read_feature_effects(...)` ingests DESeq2/edgeR/limma-style tables through explicit column
 mappings. `aggregate_feature_effects(...)` applies signature weights to upstream feature estimates.
+For decision-grade imports, wrap the rows in `FeatureEffectBatch`: it binds the exact contrast,
+parent effect provenance, independent-subject counts, tested feature universe, design formula,
+normalization, inference method, multiplicity policy, and time/population estimand. The batch
+rejects effects from a different contrast or upstream analysis. Downstream provenance includes the
+batch artifact hash and the complete signature fingerprint, so changing weights without changing a
+display ID cannot silently reuse an old result identity.
 When a labeled covariance matrix is supplied, uncertainty is
 
 \[
@@ -60,12 +74,16 @@ At evaluation time the calibrator requires:
 
 - no reused training sample identifiers;
 - no reused training subjects unless the policy is explicitly relaxed;
-- the same species, tissue, scale, feature namespace, and exact feature set; and
+- the same species, tissue, scale, feature type, namespace, assembly, full feature definitions,
+  preprocessing steps, software versions, reference resources, and exact feature set; and
 - finite values with no hidden imputation.
 
-The result includes an empirical error interval, training-calibrated centered domain-distance
-threshold, immutable species/tissue/scale/namespace metadata, calibration fingerprint, and
-conversion to an `EvidenceEstimate`. The `genomics` extra supplies scikit-learn:
+The calibration fingerprint binds the complete training matrix artifact, target values, subject
+grouping, and configuration. Prediction batches retain both training and evaluation artifact hashes
+and structured domains. The result includes an empirical error interval, training-calibrated
+centered domain-distance threshold, immutable domain metadata, and conversion to an
+`EvidenceEstimate` with an `INTERNAL_CROSS_VALIDATED` typed calibration reference. The `genomics`
+extra supplies scikit-learn:
 
 ```bash
 python -m pip install "rejuvenationkit[genomics]"
@@ -73,4 +91,6 @@ python -m pip install "rejuvenationkit[genomics]"
 
 Cross-validation is an internal calibration estimate, not proof of external validity. A signature
 trained and tested inside one cohort needs independent study validation before being used as a
-general biological-age measurement.
+general biological-age measurement. Evidence-level fusion therefore rejects internal-only
+calibration by default; an exploratory caller must opt out explicitly, or an independent validation
+workflow must issue a held-out/external calibration artifact.

@@ -20,11 +20,19 @@ python -m pip install "rejuvenationkit[genome-hf]"
 - local-cache-only operation when required by the environment.
 
 Mean pooling excludes padding and special tokens. Long sequences default to an error; explicitly
-enabled chunking records window size and overlap, then weights chunk embeddings by newly covered
-bases so overlap and short tail chunks are not overrepresented. Forward/reverse-complement
+enabled chunking records window size and overlap, then weights each whole-chunk embedding by the
+number of newly covered bases. This corrects simple whole-chunk and short-tail weighting, but it
+does **not** represent each overlapping base exactly once: a nonlinear context embedding cannot be
+decomposed into unbiased per-base contributions after inference. Configuring overlap therefore adds
+the `overlapping_chunk_pooling_is_a_context_heuristic` provenance warning. Treat overlap as an
+explicit context heuristic and validate it for the downstream task. Forward/reverse-complement
 averaging is available and recorded. Provenance also records model class, token limit, batch size, device, remote-code
 choice, and cache-only policy, plus package versions and hashes of input sequences—not the raw
 sequences themselves.
+
+Model/tokenizer revisions and input digests are revalidated on direct provenance construction.
+Input-hash keys must exactly match an `EmbeddingBatch`'s sequence IDs, and the library/input
+mappings are immutable after validation.
 
 Model code and weights can carry different security and licensing constraints. Models using
 `trust_remote_code=True` execute repository code and should be reviewed and pinned. The following

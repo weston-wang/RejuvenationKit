@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from enum import StrEnum
 from math import isfinite, sqrt
 from statistics import NormalDist
+from types import MappingProxyType
 from typing import Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from rejuvenationkit.schemas import Modality, Study
 
@@ -87,7 +89,7 @@ class FusionResult(BaseModel):
     target: str
     estimate: float
     standard_error: float = Field(gt=0)
-    modality_weights: dict[Modality, float]
+    modality_weights: Mapping[Modality, float]
     disagreement_score: float = Field(ge=0)
     confidence_level: float = Field(gt=0, lt=1)
     confidence_interval: tuple[float, float]
@@ -96,9 +98,40 @@ class FusionResult(BaseModel):
     heterogeneity_i2: float = Field(ge=0, le=1)
     present_modalities: tuple[Modality, ...]
     missing_modalities: tuple[Modality, ...]
-    calibration_ids: dict[Modality, str]
+    calibration_ids: Mapping[Modality, str]
     leave_one_modality_out: tuple[LeaveOneModalityOut, ...]
     fitted_study_id: str | None = None
+
+    @model_validator(mode="after")
+    def freeze_result_mappings(self) -> Self:
+        """Prevent mutation from invalidating a completed scientific result."""
+        object.__setattr__(
+            self,
+            "modality_weights",
+            MappingProxyType(dict(self.modality_weights)),
+        )
+        object.__setattr__(
+            self,
+            "calibration_ids",
+            MappingProxyType(dict(self.calibration_ids)),
+        )
+        return self
+
+    @field_serializer("modality_weights")
+    def serialize_modality_weights(
+        self,
+        value: Mapping[Modality, float],
+    ) -> dict[Modality, float]:
+        """Serialize immutable weights through an ordinary mapping."""
+        return dict(value)
+
+    @field_serializer("calibration_ids")
+    def serialize_calibration_ids(
+        self,
+        value: Mapping[Modality, str],
+    ) -> dict[Modality, str]:
+        """Serialize immutable calibration identities through an ordinary mapping."""
+        return dict(value)
 
     @property
     def maximum_leave_one_out_shift(self) -> float:

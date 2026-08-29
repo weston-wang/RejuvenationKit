@@ -2,10 +2,44 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
+from hashlib import sha256
+from math import isfinite
+from types import MappingProxyType
+from typing import TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+
+MetadataValue: TypeAlias = str | int | float | bool
+
+
+def _freeze_metadata(
+    values: Mapping[str, MetadataValue],
+    *,
+    field_name: str,
+) -> Mapping[str, MetadataValue]:
+    copied: dict[str, MetadataValue] = {}
+    for key, value in values.items():
+        if not key or key != key.strip():
+            raise ValueError(f"{field_name} keys must be nonblank without surrounding whitespace")
+        if isinstance(value, float) and not isfinite(value):
+            raise ValueError(f"{field_name} float values must be finite")
+        copied[key] = value
+    return MappingProxyType(copied)
+
+
+def _freeze_anchors(values: Mapping[str, datetime]) -> Mapping[str, datetime]:
+    copied: dict[str, datetime] = {}
+    for key, value in values.items():
+        if not key or key != key.strip():
+            raise ValueError("anchor keys must be nonblank without surrounding whitespace")
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(f"subject anchors must be timezone-aware: {[key]}")
+        copied[key] = value
+    return MappingProxyType(copied)
 
 
 class Modality(StrEnum):
@@ -30,20 +64,35 @@ class Subject(BaseModel):
     subject_id: str = Field(min_length=1)
     cohort: str = Field(min_length=1)
     interventions: tuple[str, ...] = ()
-    anchors: dict[str, datetime] = Field(default_factory=dict)
-    attributes: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    anchors: Mapping[str, datetime] = Field(default_factory=dict)
+    attributes: Mapping[str, MetadataValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def require_timezone_aware_anchors(self) -> Subject:
         """Reject ambiguous subject event anchors."""
-        ambiguous = [
-            name
-            for name, timestamp in self.anchors.items()
-            if timestamp.tzinfo is None or timestamp.utcoffset() is None
-        ]
-        if ambiguous:
-            raise ValueError(f"subject anchors must be timezone-aware: {sorted(ambiguous)}")
+        if len(set(self.interventions)) != len(self.interventions):
+            raise ValueError("subject interventions must be unique")
+        if any(not item or item != item.strip() for item in self.interventions):
+            raise ValueError(
+                "subject interventions must be nonblank without surrounding whitespace"
+            )
+        object.__setattr__(self, "anchors", _freeze_anchors(self.anchors))
+        object.__setattr__(
+            self,
+            "attributes",
+            _freeze_metadata(self.attributes, field_name="subject attributes"),
+        )
         return self
+
+    @field_serializer("anchors")
+    def serialize_anchors(self, value: Mapping[str, datetime]) -> dict[str, datetime]:
+        """Serialize immutable anchors through Pydantic's datetime encoder."""
+        return dict(value)
+
+    @field_serializer("attributes")
+    def serialize_attributes(self, value: Mapping[str, MetadataValue]) -> dict[str, MetadataValue]:
+        """Serialize immutable subject attributes as ordinary JSON data."""
+        return dict(value)
 
 
 class Observation(BaseModel):
@@ -61,14 +110,26 @@ class Observation(BaseModel):
     batch_id: str | None = None
     replicate_id: str | None = None
     source_uri: str | None = None
-    attributes: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    attributes: Mapping[str, MetadataValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def require_timezone(self) -> Observation:
-        """Reject ambiguous timestamps."""
+        """Reject ambiguous timestamps and unusable uncertainty values."""
         if self.timestamp.tzinfo is None or self.timestamp.utcoffset() is None:
             raise ValueError("timestamp must be timezone-aware")
+        if self.standard_error is not None and not isfinite(self.standard_error):
+            raise ValueError("standard_error must be finite")
+        object.__setattr__(
+            self,
+            "attributes",
+            _freeze_metadata(self.attributes, field_name="observation attributes"),
+        )
         return self
+
+    @field_serializer("attributes")
+    def serialize_attributes(self, value: Mapping[str, MetadataValue]) -> dict[str, MetadataValue]:
+        """Serialize immutable observation attributes as ordinary JSON data."""
+        return dict(value)
 
 
 class Study(BaseModel):
@@ -79,7 +140,7 @@ class Study(BaseModel):
     study_id: str = Field(min_length=1)
     subjects: tuple[Subject, ...]
     observations: tuple[Observation, ...]
-    metadata: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    metadata: Mapping[str, MetadataValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_references(self) -> Study:
@@ -90,4 +151,45 @@ class Study(BaseModel):
         unknown = {row.subject_id for row in self.observations}.difference(ids)
         if unknown:
             raise ValueError(f"observations reference unknown subjects: {sorted(unknown)}")
+        object.__setattr__(
+            self,
+            "metadata",
+            _freeze_metadata(self.metadata, field_name="study metadata"),
+        )
         return self
+
+    @field_serializer("metadata")
+    def serialize_metadata(self, value: Mapping[str, MetadataValue]) -> dict[str, MetadataValue]:
+        """Serialize immutable study metadata as ordinary JSON data."""
+        return dict(value)
+
+
+def study_artifact_hash(study: Study) -> str:
+    """Return an order-invariant identity for one validated logical study."""
+    subjects: list[dict[str, object]] = []
+    for subject in sorted(study.subjects, key=lambda item: item.subject_id):
+        payload = subject.model_dump(mode="json")
+        payload["interventions"] = sorted(payload["interventions"])
+        subjects.append(payload)
+    observations = [item.model_dump(mode="json") for item in study.observations]
+    observations.sort(
+        key=lambda item: json.dumps(
+            item,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+    )
+    encoded = json.dumps(
+        {
+            "schema": "rejuvenationkit.study-artifact/v1",
+            "study_id": study.study_id,
+            "subjects": subjects,
+            "observations": observations,
+            "metadata": dict(study.metadata),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()

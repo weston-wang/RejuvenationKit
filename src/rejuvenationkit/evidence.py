@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from enum import StrEnum
 from math import isfinite, sqrt
 from statistics import NormalDist
+from types import MappingProxyType
 from typing import Self
 
 import numpy as np
 import numpy.typing as npt
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from scipy.optimize import Bounds, LinearConstraint, minimize
 
 from rejuvenationkit.fusion import (
@@ -36,6 +38,36 @@ class EvidenceWeightConstraint(StrEnum):
 
     UNCONSTRAINED = "unconstrained"
     NONNEGATIVE = "nonnegative"
+
+
+class CalibrationValidationStatus(StrEnum):
+    """Validation level of a calibration artifact used to create evidence."""
+
+    UNVERIFIED = "unverified"
+    INTERNAL_CROSS_VALIDATED = "internal_cross_validated"
+    HELD_OUT_VALIDATED = "held_out_validated"
+    EXTERNALLY_VALIDATED = "externally_validated"
+
+
+class MissingCovariancePolicy(StrEnum):
+    """Behavior when declared correlated evidence lacks joint covariance."""
+
+    ERROR = "error"
+    WARN_ASSUME_INDEPENDENT = "warn_assume_independent"
+
+
+class CrossModalityCovariancePolicy(StrEnum):
+    """Behavior when hierarchical fusion cannot propagate cross-modal covariance."""
+
+    ERROR = "error"
+    WARN_IGNORE = "warn_ignore"
+
+
+class MissingEvidencePolicy(StrEnum):
+    """Behavior when prespecified evidence identifiers are unavailable."""
+
+    ERROR = "error"
+    WARN = "warn"
 
 
 class Estimand(BaseModel):
@@ -64,6 +96,32 @@ class Estimand(BaseModel):
         return "|".join(values)
 
 
+class CalibrationReference(BaseModel):
+    """Typed, hash-bound validation record for one scalar calibration.
+
+    A display identifier alone is not enough to establish that an estimate is
+    commensurate with other evidence. The artifact hash and exact estimand bind
+    the fitted calibration definition used to produce the scalar value.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    calibration_id: str = Field(min_length=1)
+    artifact_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: CalibrationValidationStatus
+    estimand: Estimand
+    method: str = Field(min_length=1)
+    validation_provenance_id: str = Field(min_length=1)
+
+    @property
+    def fusion_eligible(self) -> bool:
+        """Return whether validation used subjects held outside model fitting."""
+        return self.status in {
+            CalibrationValidationStatus.HELD_OUT_VALIDATED,
+            CalibrationValidationStatus.EXTERNALLY_VALIDATED,
+        }
+
+
 class EvidenceEstimate(BaseModel):
     """One calibrated scalar estimate with evidence-level provenance.
 
@@ -80,6 +138,7 @@ class EvidenceEstimate(BaseModel):
     estimate: float
     standard_error: float = Field(gt=0)
     calibration_id: str = Field(min_length=1)
+    calibration_reference: CalibrationReference | None = None
     provenance_id: str = Field(min_length=1)
     subject_id: str | None = None
     sample_id: str | None = None
@@ -96,6 +155,11 @@ class EvidenceEstimate(BaseModel):
             raise ValueError("estimate and standard_error must be finite")
         if len(set(self.quality_flags)) != len(self.quality_flags):
             raise ValueError("quality_flags must be unique")
+        if self.calibration_reference is not None:
+            if self.calibration_reference.calibration_id != self.calibration_id:
+                raise ValueError("calibration_reference identifier must match calibration_id")
+            if self.calibration_reference.estimand != self.estimand:
+                raise ValueError("calibration_reference estimand must match evidence estimand")
         return self
 
 
@@ -122,10 +186,10 @@ class EvidenceCovariance(BaseModel):
         matrix = np.asarray(self.covariance, dtype=float)
         if not np.isfinite(matrix).all():
             raise ValueError("covariance values must be finite")
-        if not np.allclose(matrix, matrix.T, rtol=1e-10, atol=1e-12):
-            raise ValueError("covariance must be symmetric")
         if np.any(np.diag(matrix) <= 0):
             raise ValueError("covariance diagonal must be positive")
+        if not _covariance_is_symmetric(matrix):
+            raise ValueError("covariance must be symmetric relative to its marginal scales")
         return self
 
     @classmethod
@@ -199,6 +263,20 @@ class EvidenceFusionConfig(BaseModel):
     weight_constraint: EvidenceWeightConstraint = EvidenceWeightConstraint.UNCONSTRAINED
     allow_mixed_species: bool = False
     allow_mixed_subjects: bool = False
+    require_fusion_eligible_calibration: bool = True
+    missing_covariance_policy: MissingCovariancePolicy = MissingCovariancePolicy.ERROR
+    cross_modality_covariance_policy: CrossModalityCovariancePolicy = (
+        CrossModalityCovariancePolicy.ERROR
+    )
+    expected_evidence_ids: tuple[str, ...] = ()
+    missing_evidence_policy: MissingEvidencePolicy = MissingEvidencePolicy.ERROR
+
+    @model_validator(mode="after")
+    def validate_expected_evidence(self) -> Self:
+        """Require a unique prespecified evidence set when supplied."""
+        if len(set(self.expected_evidence_ids)) != len(self.expected_evidence_ids):
+            raise ValueError("expected_evidence_ids must be unique")
+        return self
 
 
 class EvidenceFusionResult(BaseModel):
@@ -211,9 +289,9 @@ class EvidenceFusionResult(BaseModel):
     standard_error: float = Field(gt=0)
     confidence_level: float = Field(gt=0, lt=1)
     confidence_interval: tuple[float, float]
-    evidence_weights: dict[str, float]
-    modality_weights: dict[Modality, float]
-    standardized_residuals: dict[str, float]
+    evidence_weights: Mapping[str, float]
+    modality_weights: Mapping[Modality, float]
+    standardized_residuals: Mapping[str, float]
     disagreement_score: float = Field(ge=0)
     effective_evidence_count: float = Field(gt=0)
     condition_number: float = Field(ge=1)
@@ -222,6 +300,29 @@ class EvidenceFusionResult(BaseModel):
     leave_one_evidence_out: tuple[LeaveOneEvidenceOut, ...]
     leave_one_modality_out: tuple[LeaveOneEvidenceModalityOut, ...]
     warnings: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def freeze_result_mappings(self) -> Self:
+        """Prevent post-validation changes to weights or residual diagnostics."""
+        for field_name in (
+            "evidence_weights",
+            "modality_weights",
+            "standardized_residuals",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                MappingProxyType(dict(getattr(self, field_name))),
+            )
+        return self
+
+    @field_serializer("evidence_weights", "modality_weights", "standardized_residuals")
+    def serialize_result_mappings(
+        self,
+        value: Mapping[str, float] | Mapping[Modality, float],
+    ) -> dict[str, float] | dict[Modality, float]:
+        """Serialize immutable diagnostics through ordinary mappings."""
+        return dict(value)
 
     @property
     def maximum_leave_one_out_shift(self) -> float:
@@ -243,9 +344,27 @@ class HierarchicalFusionResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     estimand: Estimand
-    within_modality: dict[Modality, EvidenceFusionResult]
+    within_modality: Mapping[Modality, EvidenceFusionResult]
     across_modality: FusionResult
     warnings: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def freeze_within_modality(self) -> Self:
+        """Prevent replacement of a validated within-modality result."""
+        object.__setattr__(
+            self,
+            "within_modality",
+            MappingProxyType(dict(self.within_modality)),
+        )
+        return self
+
+    @field_serializer("within_modality")
+    def serialize_within_modality(
+        self,
+        value: Mapping[Modality, EvidenceFusionResult],
+    ) -> dict[Modality, EvidenceFusionResult]:
+        """Serialize the immutable hierarchy through an ordinary mapping."""
+        return dict(value)
 
 
 class _GLSValues(BaseModel):
@@ -306,6 +425,13 @@ class GeneralizedLeastSquaresFusion:
             )
         }
         warnings = self._warnings(estimates, values, covariance_supplied=covariance is not None)
+        missing_expected = sorted(
+            set(self.config.expected_evidence_ids).difference(
+                item.evidence_id for item in estimates
+            )
+        )
+        if missing_expected:
+            warnings = (*warnings, "prespecified_evidence_missing")
         return EvidenceFusionResult(
             estimand=estimates[0].estimand,
             estimate=values.estimate,
@@ -349,6 +475,8 @@ class GeneralizedLeastSquaresFusion:
         }
 
     def _validate_estimates(self, estimates: tuple[EvidenceEstimate, ...]) -> None:
+        for item in estimates:
+            EvidenceEstimate.model_validate(item.model_dump())
         if len(estimates) < self.config.minimum_evidence:
             raise ValueError(
                 f"at least {self.config.minimum_evidence} evidence estimates are required"
@@ -356,6 +484,13 @@ class GeneralizedLeastSquaresFusion:
         identifiers = [item.evidence_id for item in estimates]
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("evidence_id values must be unique")
+        if self.config.expected_evidence_ids:
+            unexpected = sorted(set(identifiers).difference(self.config.expected_evidence_ids))
+            if unexpected:
+                raise ValueError(f"evidence was not prespecified: {unexpected}")
+            missing = sorted(set(self.config.expected_evidence_ids).difference(identifiers))
+            if missing and self.config.missing_evidence_policy is MissingEvidencePolicy.ERROR:
+                raise ValueError(f"prespecified evidence is missing: {missing}")
         estimands = {item.estimand for item in estimates}
         if len(estimands) != 1:
             raise ValueError("all evidence estimates must share one complete estimand")
@@ -365,6 +500,23 @@ class GeneralizedLeastSquaresFusion:
         subjects = {item.subject_id for item in estimates if item.subject_id is not None}
         if len(subjects) > 1 and not self.config.allow_mixed_subjects:
             raise ValueError("evidence from multiple subjects requires an explicit fusion policy")
+        if self.config.require_fusion_eligible_calibration:
+            missing_references = sorted(
+                item.evidence_id for item in estimates if item.calibration_reference is None
+            )
+            if missing_references:
+                raise ValueError(
+                    "fusion-eligible CalibrationReference is required for evidence: "
+                    f"{missing_references}"
+                )
+            ineligible = sorted(
+                item.evidence_id
+                for item in estimates
+                if item.calibration_reference is not None
+                and not item.calibration_reference.fusion_eligible
+            )
+            if ineligible:
+                raise ValueError(f"evidence calibration is not fusion eligible: {ineligible}")
 
     def _aligned_covariance(
         self,
@@ -372,6 +524,16 @@ class GeneralizedLeastSquaresFusion:
         covariance: EvidenceCovariance | None,
     ) -> tuple[npt.NDArray[np.float64], str]:
         if covariance is None:
+            grouped: defaultdict[str, int] = defaultdict(int)
+            for item in estimates:
+                if item.correlation_group is not None:
+                    grouped[item.correlation_group] += 1
+            if any(count > 1 for count in grouped.values()) and (
+                self.config.missing_covariance_policy is MissingCovariancePolicy.ERROR
+            ):
+                raise ValueError(
+                    "joint covariance is required for evidence sharing a correlation_group"
+                )
             diagonal = np.asarray([item.standard_error**2 for item in estimates])
             return np.diag(diagonal), "reported-independent-standard-errors"
         expected_ids = {item.evidence_id for item in estimates}
@@ -382,12 +544,8 @@ class GeneralizedLeastSquaresFusion:
         source = np.asarray(covariance.covariance, dtype=float)
         matrix = source[np.ix_(indices, indices)]
         reported = np.asarray([item.standard_error**2 for item in estimates])
-        if not np.allclose(
-            np.diag(matrix),
-            reported,
-            rtol=self.config.variance_relative_tolerance,
-            atol=self.config.psd_tolerance * float(np.max(reported)),
-        ):
+        relative_error = np.abs(np.diag(matrix) - reported) / reported
+        if np.any(relative_error > self.config.variance_relative_tolerance):
             raise ValueError("covariance diagonal must agree with reported standard errors")
         return matrix, covariance.source_id
 
@@ -399,12 +557,17 @@ class GeneralizedLeastSquaresFusion:
         covariance_scale = float(np.max(np.diag(covariance)))
         if not isfinite(covariance_scale) or covariance_scale <= 0:
             raise ValueError("covariance must have positive finite marginal variances")
+        marginal_errors = np.sqrt(np.diag(covariance))
+        standardized_covariance = covariance / np.outer(marginal_errors, marginal_errors)
+        standardized_eigenvalues = np.linalg.eigvalsh(standardized_covariance)
+        standardized_largest = float(standardized_eigenvalues[-1])
+        standardized_smallest = float(standardized_eigenvalues[0])
+        if standardized_smallest < -self.config.psd_tolerance * max(1.0, standardized_largest):
+            raise ValueError("covariance must be positive semidefinite")
         normalized_covariance = covariance / covariance_scale
         eigenvalues = np.linalg.eigvalsh(normalized_covariance)
         largest = float(eigenvalues[-1])
         smallest = float(eigenvalues[0])
-        if smallest < -self.config.psd_tolerance * max(1.0, largest):
-            raise ValueError("covariance must be positive semidefinite")
         normalized_ridge = self.config.covariance_ridge / covariance_scale
         ill_conditioned = (
             smallest + normalized_ridge <= 0
@@ -617,10 +780,18 @@ class HierarchicalEvidenceFusion:
         ).fuse(tuple(modality_estimates))
         warnings: list[str] = []
         if covariance is not None and len(grouped) > 1:
-            cross_blocks = full_covariance.copy()
+            marginal_errors = np.sqrt(np.diag(full_covariance))
+            cross_blocks = full_covariance / np.outer(marginal_errors, marginal_errors)
             for indices in grouped.values():
                 cross_blocks[np.ix_(indices, indices)] = 0
             if np.any(np.abs(cross_blocks) > self._within.config.psd_tolerance):
+                if (
+                    self._within.config.cross_modality_covariance_policy
+                    is CrossModalityCovariancePolicy.ERROR
+                ):
+                    raise ValueError(
+                        "hierarchical fusion cannot propagate nonzero cross-modality covariance"
+                    )
                 warnings.append("cross_modality_covariance_not_propagated_by_hierarchy")
         return HierarchicalFusionResult(
             estimand=estimates[0].estimand,
@@ -628,3 +799,25 @@ class HierarchicalEvidenceFusion:
             across_modality=across,
             warnings=tuple(warnings),
         )
+
+
+def _covariance_is_symmetric(
+    matrix: npt.NDArray[np.float64],
+    *,
+    relative_tolerance: float = 1e-10,
+    absolute_correlation_tolerance: float = 1e-12,
+) -> bool:
+    """Compare covariance symmetry after standardizing every marginal scale."""
+    diagonal = np.diag(matrix)
+    if np.any(diagonal <= 0) or not np.isfinite(diagonal).all():
+        return False
+    marginal_errors = np.sqrt(diagonal)
+    standardized = matrix / np.outer(marginal_errors, marginal_errors)
+    return bool(
+        np.allclose(
+            standardized,
+            standardized.T,
+            rtol=relative_tolerance,
+            atol=absolute_correlation_tolerance,
+        )
+    )

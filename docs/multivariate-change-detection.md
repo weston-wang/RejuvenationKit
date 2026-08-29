@@ -56,14 +56,35 @@ report = detector.score(
 )
 ```
 
+## Serialized-model integrity and reconstruction
+
+A fitted `ChangeDetectionModel` contains the exact fit configuration and visits, resolved
+modality/feature/unit/aggregation channels, requested and complete reference-subject IDs, the
+reference-input artifact hash, and the sorted reference-score distribution. The serialized
+`threshold_quantile_method` is `higher`; validation recomputes the threshold from the stored
+scores and `false_alarm_rate` rather than trusting the stored threshold alone.
+
+`model_artifact_hash` is a deterministic SHA-256 digest over every other serialized model field.
+`ChangeDetectionModel.model_validate(...)` and `model_validate_json(...)` reject incomplete fitted
+provenance, mismatches between duplicated config/channel metadata, an inconsistent empirical
+threshold, and a stale model hash. `MultivariateChangeDetector.from_model(...)` performs the same
+validation before rebuilding its inverse covariance, Cholesky factor, and empirical reference
+scores. It refuses lightweight report-only models that lack complete fitted provenance.
+
+When the reconstructed detector scores a `Study`, it also recomputes the reference-input artifact
+from the current labeled reference changes and compares it with the fit-time value. This detects
+changed reference values, identities, visits, or channel resolution. These hashes are
+content-integrity and reproducibility identifiers, not keyed signatures and not proof that the
+reference data or model is scientifically valid.
+
 ## Interpretation limits
 
 - A detection means the joint change is unusual under the fitted reference distribution. It does
   not mean the subject improved, deteriorated, or responded to treatment.
 - Feature direction remains in `change` and `innovation`; Mahalanobis distance itself is
   directionless.
-- Calibration subjects should represent the intended null or normal-aging population and should
-  be independent of evaluation subjects.
+- Calibration subjects should represent the intended null or normal-aging population. Scoring
+  fails closed if any requested evaluation subject was part of the fitted reference set.
 - The empirical threshold controls false alarms only to the extent that calibration and
   evaluation data are exchangeable.
 - Missing any configured channel excludes that subject rather than imputing it.

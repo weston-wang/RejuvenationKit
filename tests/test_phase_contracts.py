@@ -2,7 +2,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from rejuvenationkit.combinations import FactorialCombinationAnalysis, InteractionEstimate
+from rejuvenationkit.combinations import (
+    AssignmentMechanism,
+    FactorialCombinationAnalysis,
+    FactorialCombinationConfig,
+    InteractionEstimate,
+)
 from rejuvenationkit.fusion import ModalityEstimate, PrecisionWeightedFusion
 from rejuvenationkit.qc import BaselineLongitudinalQC
 from rejuvenationkit.schemas import Modality, Observation, Study, Subject
@@ -49,7 +54,7 @@ def test_phase_two_reference_estimator_is_operational(study: Study) -> None:
     assert result.fitted_study_id == "study"
 
 
-def test_phase_three_stubs_are_explicit(study: Study) -> None:
+def test_phase_three_unconfigured_compatibility_path_is_explicit(study: Study) -> None:
     estimator = LinearGaussianStateEstimator()
     with pytest.raises(NotImplementedError, match="state model"):
         estimator.fit(study)
@@ -57,7 +62,7 @@ def test_phase_three_stubs_are_explicit(study: Study) -> None:
         estimator.estimate(study)
 
 
-def test_phase_four_stub_and_schema_are_explicit(study: Study) -> None:
+def test_phase_four_requires_subject_level_endpoints(study: Study) -> None:
     result = InteractionEstimate(
         interventions=("therapy-a", "therapy-b"),
         outcome="biological_age_delta",
@@ -66,5 +71,11 @@ def test_phase_four_stub_and_schema_are_explicit(study: Study) -> None:
         reference_model="additive",
     )
     assert result.interventions == ("therapy-a", "therapy-b")
-    with pytest.raises(NotImplementedError, match="combination"):
-        FactorialCombinationAnalysis().estimate(study, outcome=result.outcome)
+    estimator = FactorialCombinationAnalysis(
+        FactorialCombinationConfig(
+            interventions=("therapy-a", "therapy-b"),
+            assignment_mechanism=AssignmentMechanism.RANDOMIZED,
+        )
+    )
+    with pytest.raises(ValueError, match="SubjectEndpointBatch"):
+        estimator.estimate(study, outcome=result.outcome)

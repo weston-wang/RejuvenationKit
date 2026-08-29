@@ -10,6 +10,7 @@ upstream assay pipeline
           ├─ counts / normalized expression
           ├─ methylation beta or M values
           ├─ VCF/BCF dosage
+          ├─ normalized protein abundance
           └─ precomputed sequence embeddings
           │
      GenomicMatrix
@@ -28,10 +29,18 @@ Every matrix declares:
 - species taxonomy ID, tissue, assay, cohort, subject, and batch metadata;
 - feature namespace, type, and optional genome assembly and coordinates;
 - numerical scale such as raw counts, normalized expression, methylation beta, M-value, variant
-  dosage, or embedding;
+  dosage, linear protein abundance, normalized log protein abundance, or embedding;
 - preprocessing, source identifier, optional external-file checksum, software versions, and
   reference resources; and
-- a content hash computed over aligned identifiers and numerical storage.
+- a content hash computed over aligned identifiers and logical numerical values; and
+- a semantic artifact hash computed over values, scale, complete sample and feature metadata, and
+  provenance.
+
+Both hashes use the versioned `genomic-matrix-hash/v2` encoding. Dense and canonical CSR storage
+of the same logical matrix produce the same digest; fields are tagged and length-delimited to
+avoid byte-concatenation ambiguity. The `content_hash` API remains available, but v2 digest values
+are intentionally different from earlier alpha releases. Persisted calibration or provenance
+artifacts should therefore record the package version and be rebuilt when migrating from v1.
 
 Dense matrices may encode missing measurements as `NaN`; infinity is rejected. Sparse matrices
 interpret absent entries as measured zero and therefore cannot silently use sparse absence for
@@ -62,6 +71,11 @@ python -m pip install "rejuvenationkit[genomics,hts]"
   interval overlaps and requires an annotation assembly that matches the matrix.
 - `normalize_counts_log_cpm(...)` calculates library size from every raw-count feature but can emit
   only requested signature features, avoiding dense expansion of a complete sparse transcriptome.
+- `from_protein_abundance_frame(...)` creates `PROTEIN` matrices with either a nonnegative linear
+  `PROTEIN_ABUNDANCE` scale or an explicitly normalized `LOG_PROTEIN_ABUNDANCE` scale, and a
+  UniProt, explicit STRING-protein, or custom namespace. HGNC IDs, HGNC symbols, STRING protein
+  IDs, and STRING preferred symbols are distinct namespaces; legacy ambiguous `HGNC` and `STRING`
+  values remain readable only for early-alpha artifact compatibility.
 
 RejuvenationKit does not replace base calling, read alignment, variant normalization, DESeq2,
 edgeR, limma, or array preprocessing. It validates their curated outputs and constructs auditable
@@ -76,3 +90,7 @@ versioned ortholog map and validation artifact.
 
 The canonical taxonomy IDs used in examples are `9606` for human, `10090` for mouse, and `9615` for
 dog. Multi-species sequence-model pretraining is not evidence that a model is calibrated in dogs.
+
+External annotations and database results use a separate provider-neutral provenance layer and do
+not become efficacy estimates merely by joining them to a matrix. See
+[external biology resources](external-biology-resources.md).

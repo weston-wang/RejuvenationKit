@@ -18,6 +18,7 @@ from rejuvenationkit.genomics import (
     from_anndata,
     from_expression_frame,
     from_methylation_beta,
+    from_protein_abundance_frame,
     normalize_counts_log_cpm,
     read_vcf_dosage,
 )
@@ -73,6 +74,45 @@ def test_expression_and_methylation_frame_adapters() -> None:
         beta_to_m_values(expression)
     with pytest.raises(ValueError, match="epsilon"):
         beta_to_m_values(beta, epsilon=0.5)
+
+
+def test_protein_abundance_adapter_declares_entity_namespace_and_scale() -> None:
+    frame = pd.DataFrame(
+        [[10.0, 2.0], [8.0, 4.0]],
+        index=["s1", "s2"],
+        columns=["P12345", "Q99999"],
+    )
+    matrix = from_protein_abundance_frame(
+        frame,
+        samples=samples(),
+        provenance=provenance(),
+    )
+
+    assert matrix.scale is MatrixScale.PROTEIN_ABUNDANCE
+    assert matrix.features[0].feature_type is GenomicFeatureType.PROTEIN
+    assert matrix.features[0].namespace is FeatureNamespace.UNIPROT
+    string_matrix = from_protein_abundance_frame(
+        frame,
+        samples=samples(),
+        provenance=provenance(),
+        namespace=FeatureNamespace.STRING_PROTEIN,
+    )
+    assert string_matrix.features[0].namespace is FeatureNamespace.STRING_PROTEIN
+    logged = from_protein_abundance_frame(
+        frame - 9,
+        samples=samples(),
+        provenance=provenance(),
+        scale=MatrixScale.LOG_PROTEIN_ABUNDANCE,
+    )
+    assert logged.scale is MatrixScale.LOG_PROTEIN_ABUNDANCE
+    assert logged.dense_values().min() < 0
+    with pytest.raises(ValueError, match="protein-compatible"):
+        from_protein_abundance_frame(
+            frame,
+            samples=samples(),
+            provenance=provenance(),
+            namespace=FeatureNamespace.ENSEMBL,
+        )
 
 
 def test_log_cpm_normalization_uses_full_library_and_limits_output_features() -> None:

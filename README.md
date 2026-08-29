@@ -10,15 +10,19 @@ rejuvenation studies. It sits above established assay-specific pipelines and hel
 answer:
 
 > **Is this study trustworthy, did the intervention produce a coherent response, when did it
-> appear, and which biological systems drove it?**
+> appear, and which measurement systems contributed the evidence?**
 
-Phase 1 and the expanded Phase 2 baseline are available as an alpha. Phase 1 includes
+All four roadmap phases are available as an integrated alpha. Phase 1 includes
 protocol-aware quality control, analysis-readiness profiling, experimental-confounding checks,
 held-out DSP change detection, sequential response monitoring, randomized longitudinal inference,
 and reproducible report bundles. Phase 2 adds calibrated fixed- and random-effects multimodal
 fusion, evidence-level covariance and hierarchical fusion, dense/sparse genome-scale matrices,
-genomic signatures, leakage-aware target calibration, and optional provenance-tracked Hugging Face
-sequence embeddings.
+genomic signatures, leakage-aware target calibration, optional provenance-tracked Hugging Face
+sequence embeddings, and an offline provider-neutral layer for versioned annotations, gene sets,
+overrepresentation analysis, interaction networks, variant context, ortholog maps, and public
+sequencing-study manifests. Phase 3 adds irregular-time latent-state filtering, smoothing,
+forecasting, held-out calibration, and innovation change detection. Phase 4 adds explicit endpoint
+bridges, factorial combination-therapy estimands, design diagnostics, and design helpers.
 
 This project is for research use. It is not medical software and does not produce treatment
 recommendations.
@@ -43,9 +47,12 @@ biology with site, plate, assay run, operator, manufacturing lot, or visit timin
 - Batch shifts, replicate disagreement, distribution anomalies, and attrition bias
 - Weak paired-analysis sample sizes hidden by apparently large enrollment
 - Multichannel responses that emerge gradually or persist across visits
-- Individual responders and dominant evidence modalities
+- Individual trajectory departures and dominant evidence modalities
 - False precision from correlated clocks or several signatures built from the same omics data
 - Species, tissue, feature-namespace, and training/evaluation-domain mismatches in genomic models
+- Unresolved or mismatched external-resource releases, query domains, feature sets, and assemblies
+- Enrichment analyses with an invalid selected/background relationship or hidden test family
+- Sequencing manifests that confuse technical runs with independent animals
 - Randomized treatment effects calibrated without fitting the null model on treated subjects
 
 ## Public canine validation
@@ -63,6 +70,9 @@ The one-command audit was run end to end on public Dog Aging Project longitudina
 The cohort is observational and contains no rapamycin assignment, so detections are not treatment
 effects. The case demonstrates real ingestion, missingness, retention, held-out calibration,
 reporting, and artifact integrity. See [the DAP audit case study](docs/dap-audit-case-study.md).
+These figures record a prior online reference run. CI exercises the adapter with a bounded fixture,
+but the original downloaded archive digest was not retained, so the exact counts are not presented
+as a content-addressed regression target.
 
 ## Evaluate it with a study
 
@@ -77,26 +87,33 @@ or identifiable data to a public issue.
 ```text
 Study / subject / observation schemas
                  │
-        ┌────────┴────────┐
-        │ Phase 1: QC     │  longitudinal integrity, drift, outliers
+        ┌────────▼────────┐
+        │ Phase 1: Trust  │  QC, readiness, DSP diagnostics
         └────────┬────────┘
                  │
-        ┌────────┴────────┐
-        │ Phase 2: Fusion │  multimodal estimates + uncertainty
-        └────────┬────────┘
-                 │
-        ┌────────┴────────┐
-        │ Phase 3: State  │  latent biological-state tracking
-        └────────┬────────┘
-                 │
-        ┌────────┴──────────────┐
-        │ Phase 4: Full SDK     │  workflows, combinations, reporting
-        └───────────────────────┘
+             QC gate
+       ┌─────────┼──────────┐
+       │         │          │
+┌──────▼─────┐ ┌─▼────────┐ ┌▼──────────────┐
+│ Phase 2    │ │ Phase 3  │ │ Phase 4       │
+│ evidence   │ │ state    │ │ combinations  │
+│ + fusion   │ │ tracking │ │ + design      │
+└──────┬─────┘ └─┬────────┘ └┬──────────────┘
+       └─────────┼───────────┘
+                 ▼
+       Verified workflow report
 ```
+
+Phases 2–4 are separately configured branches after the common QC gate. Optional typed bridges can
+turn calibrated subject/time measurements into Phase 3 observations or prespecified Phase 3 states
+into Phase 4 endpoints, but the workflow never invents either conversion.
 
 The core schemas are assay-neutral. An observation identifies a subject, time point, modality,
 feature, value, unit, and optional uncertainty. Algorithms consume validated `Study` objects and
 return typed result objects rather than unstructured tables.
+
+See the detailed [Phase 2 architecture and research use cases](docs/phase-2-architecture-and-use-cases.md)
+and the [external biology resource boundary](docs/external-biology-resources.md).
 
 ## Roadmap
 
@@ -110,34 +127,48 @@ return typed result objects rather than unstructured tables.
 - **Phase 2 — `aging-fusion` (expanded baseline implemented):** fuse commensurate clocks, omics,
   pathology, imaging, and clinical estimates while preserving uncertainty, covariance,
   missingness, calibration provenance, disagreement, evidence/modality influence, and genomic
-  domain metadata. Public external genomic benchmarking and cross-species ortholog mapping remain
-  domain metadata, a public external genomic benchmark, and explicit cross-species ortholog
-  mapping.
-- **Phase 3 — `aging-state`:** longitudinal latent-state estimation, smoothing, change-point
-  detection, and forecast validation.
-- **Phase 4 — full SDK:** stable workflows, combination-therapy interaction analysis,
-  reporting, adapters, documentation, and public benchmark datasets.
+  domain metadata. The current expansion also provides explicit cross-species ortholog mapping,
+  an external genomic benchmark, and frozen external annotation, enrichment, network, variant, and
+  sequencing-discovery artifacts that remain outside efficacy fusion until independently
+  prespecified or calibrated.
+- **Phase 3 — `aging-state` (implemented baseline):** typed continuous-time linear-Gaussian
+  models, exact irregular-time filtering, RTS smoothing, partial-channel updates, held-out forecast
+  validation, and innovation change-point detection.
+- **Phase 4 — full SDK (implemented alpha):** explicit subject-endpoint bridges, factorial
+  combination-therapy interaction analysis, uncertainty and multiplicity policies, cell and
+  identifiability diagnostics, two-by-two design helpers, and a manifest-verified workflow that
+  runs any configured Phase 1-to-4 subset behind the serialized QC gate.
 
 Milestones and acceptance criteria live in [docs/roadmap.md](docs/roadmap.md).
 
 ## Quick start
 
+Until the first version is published to PyPI, install from a source checkout and record the exact
+commit used for any research result:
+
 ```bash
+git clone https://github.com/weston-wang/RejuvenationKit.git
+cd RejuvenationKit
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install "rejuvenationkit[visualization]"
+python -m pip install ".[visualization]"
 ```
+
+After a version is available on PyPI, replace the last command with a version-pinned install such
+as `python -m pip install "rejuvenationkit[visualization]==<version>"`.
 
 For genome-scale matrices, target calibration, VCF/BCF, and optional sequence models:
 
 ```bash
 python -m pip install "rejuvenationkit[genomics,hts]"
+# For bounded-memory Parquet imports of large archived tables:
+python -m pip install "rejuvenationkit[arrow]"
 # Large model dependencies are deliberately separate:
 python -m pip install "rejuvenationkit[genome-hf]"
 ```
 
-Until the first version is published to PyPI, install the current source release from GitHub as
-described in [the publishing guide](docs/publishing.md).
+Reproducible source-SHA installation and release steps are described in
+[the publishing guide](docs/publishing.md).
 
 ```python
 from datetime import datetime, timezone
@@ -161,8 +192,9 @@ study = Study(
 ```
 
 Run `run_phase1_audit(...)` with a `QCConfig` and output directory to create the JSON, CSV,
-Markdown, manifest, and visualization bundle. The complete workflow is documented in
-[the study-audit guide](docs/study-audit.md).
+Markdown, manifest, and visualization bundle. The Phase 1 workflow is documented in
+[the study-audit guide](docs/study-audit.md); the integrated SDK workflow is documented in the
+[four-phase workflow guide](docs/four-phase-workflow.md).
 
 For development:
 
@@ -219,11 +251,28 @@ hierarchically. A differently defined inflammatory safety signal stays outside t
 fusion. All values are synthetic.
 The
 [`examples/public_gse131754_genomic_fusion.py`](examples/public_gse131754_genomic_fusion.py)
-workflow downloads a real 43,629-gene mouse-liver rapamycin dataset and validates joint genomic
+workflow downloads a real 43,629-gene mouse-liver rapamycin dataset and exercises joint genomic
 signature covariance, shrinkage, and pathway-specific estimands across age/sex/dose strata. It
 keeps the pathway vector intact instead of manufacturing one uncalibrated efficacy score. The
 panels are engineering fixtures, not validated biological-age clocks; see the
 [public benchmark report](docs/gse131754-genomic-benchmark.md).
+The [`examples/external_biology_context.py`](examples/external_biology_context.py) workflow imports
+archived GO- and STRING-shaped fixtures, runs explicit-background directionless
+overrepresentation and a separate directional ranked-set analysis, preserves interaction evidence
+channels, and demonstrates that database context remains `not_fusible` rather than becoming an
+efficacy estimate.
+The [`examples/phase3_longitudinal_state.py`](examples/phase3_longitudinal_state.py) workflow uses
+irregular visits and partial channels to demonstrate filtering, smoothing, held-out forecast
+calibration, innovation change points, and model-conditional forecasts on synthetic data.
+The [`examples/phase4_factorial_combinations.py`](examples/phase4_factorial_combinations.py)
+workflow analyzes a fully synthetic 72-dog rapamycin-by-senolytic factorial study with a declared
+endpoint, baseline adjustment, endpoint uncertainty, HC3 covariance, multiplicity control, and
+cell-level design diagnostics. Its interaction is a departure from additivity on the declared
+scale, not an automatic claim of synergy or efficacy.
+The [`examples/four_phase_workflow.py`](examples/four_phase_workflow.py) workflow runs a fully
+synthetic canine study through the serialized Phase 1 QC gate and explicit Phase 2, Phase 3, and
+Phase 4 inputs, publishes a checksummed manifest-last bundle, and verifies it on load. It is an
+integration demonstration, not evidence that the simulated interventions work.
 
 ## Contribution workflow
 

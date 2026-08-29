@@ -17,6 +17,11 @@ The feature-level estimate is the treated change from baseline minus the control
 baseline. This removes stable baseline differences. Random assignment remains the basis for a
 causal interpretation.
 
+The configuration therefore requires an explicit
+`assignment_mechanism=AssignmentMechanism.RANDOMIZED` declaration. The evaluator rejects
+`OBSERVATIONAL` assignment before analysis: unrestricted treatment-label permutation is not a
+valid substitute for a prespecified observational estimand and confounding model.
+
 ## Leakage-safe calibration
 
 Subjects are assigned deterministically to cross-validation folds. For each fold:
@@ -31,11 +36,16 @@ Consequently, no animal contributes to the nuisance model used to score that ani
 in-sample control score is used as the empirical null.
 
 ```python
-from rejuvenationkit import RandomizedTreatmentEffectEvaluator, TreatmentEffectConfig
+from rejuvenationkit import (
+    AssignmentMechanism,
+    RandomizedTreatmentEffectEvaluator,
+    TreatmentEffectConfig,
+)
 
 evaluator = RandomizedTreatmentEffectEvaluator(
     TreatmentEffectConfig(
         features=features,
+        assignment_mechanism=AssignmentMechanism.RANDOMIZED,
         cross_validation_folds=5,
         permutations=999,
         bootstrap_samples=999,
@@ -59,8 +69,12 @@ with correlated inflammatory and frailty channels.
 
 ## Interpretation limits
 
-- Group membership must be prespecified. The evaluator does not infer randomization from cohort
-  names or intervention metadata.
+- Group membership must be prespecified. The required assignment declaration records the design;
+  the evaluator does not infer or verify randomization from cohort names, intervention metadata,
+  or outcome patterns.
+- Observational groups are rejected rather than relabeled as randomized. They require a separately
+  justified observational analysis with an explicit estimand, covariate strategy, and sensitivity
+  analysis.
 - Confidence intervals are nonparametric subject-bootstrap intervals, not multiplicity-adjusted
   confirmatory intervals.
 - The omnibus permutation test preserves correlation among channels but currently tests each

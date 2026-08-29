@@ -32,6 +32,8 @@ Every audit contains:
 | `paired_readiness.csv` | Feature-specific paired-analysis sample sizes |
 | `feature_distributions.csv` | Visit-level distributions and robust outliers |
 | `attrition_bias.csv` | Baseline differences between retained and attrited subjects |
+| `differential_attrition.csv` | Between-cohort complete-case attrition comparisons |
+| `longitudinal_exclusions.csv` | Deduplicated, analysis-attributed reasons for omitted values and trajectories |
 | `audit_overview.png` | Findings, coverage, retention, and outlier overview |
 
 The overview requires the `visualization` installation extra. Set
@@ -93,8 +95,21 @@ external canine data.
 The JSON report contains the report-schema version, RejuvenationKit version, complete audit
 configuration, study metadata, and a canonical SHA-256 fingerprint of the validated input model.
 The separate manifest records the versions plus byte sizes and SHA-256 digests for every other
-artifact. The input fingerprint detects changes to subjects, observations, ordering, or metadata;
-it is not a substitute for archiving the source dataset.
+artifact. The input fingerprint detects changes to logical subject content, observations, or
+metadata, while canonicalizing tuple order. Input ordering remains a separate QC property reported
+by `check_input_order`; the fingerprint is not a substitute for archiving the source dataset.
+
+The current Phase 1 report schema is version 3. Version 3 adds profiler-origin longitudinal
+exclusions to the serialized audit contract and strictly binds the QC gate, plans, results,
+exclusion counts, and artifact inventory. Persisted version 2 reports must be regenerated rather
+than being silently reinterpreted under the stronger contract.
+
+Serialized audit validation reconstructs the QC gate, plan/result disposition, study identities,
+subject partitions, exclusion counts, and expected artifact inventory. Reruns validate every
+previous manifest-managed artifact before replacing it and publish the new manifest last. The
+publisher rejects symlink output directories, symlinked managed artifacts, unsafe manifest paths,
+and checksum-mismatched prior bundles rather than following or deleting them. Unmanaged regular
+files in the output directory remain untouched.
 
 A `PASS` means only that the configured QC checks found no errors. Warnings, analysis readiness,
 attrition, study design, endpoint definitions, and the prespecified statistical analysis plan

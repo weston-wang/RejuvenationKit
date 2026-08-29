@@ -1,9 +1,13 @@
+from hashlib import sha256
 from math import isclose
 
 import pytest
 from pydantic import ValidationError
 
 from rejuvenationkit import (
+    CalibrationReference,
+    CalibrationValidationStatus,
+    CrossModalityCovariancePolicy,
     EffectDirection,
     Estimand,
     EvidenceCovariance,
@@ -13,6 +17,8 @@ from rejuvenationkit import (
     FusionModel,
     GeneralizedLeastSquaresFusion,
     HierarchicalEvidenceFusion,
+    MissingCovariancePolicy,
+    MissingEvidencePolicy,
     Modality,
 )
 
@@ -35,13 +41,23 @@ def evidence(
     *,
     target: Estimand | None = None,
 ) -> EvidenceEstimate:
+    resolved_target = target or estimand()
+    calibration_id = f"calibration:{evidence_id}"
     return EvidenceEstimate(
         evidence_id=evidence_id,
         modality=modality,
-        estimand=target or estimand(),
+        estimand=resolved_target,
         estimate=value,
         standard_error=error,
-        calibration_id=f"calibration:{evidence_id}",
+        calibration_id=calibration_id,
+        calibration_reference=CalibrationReference(
+            calibration_id=calibration_id,
+            artifact_hash=sha256(calibration_id.encode()).hexdigest(),
+            status=CalibrationValidationStatus.EXTERNALLY_VALIDATED,
+            estimand=resolved_target,
+            method="held-out external calibration",
+            validation_provenance_id=f"validation:{evidence_id}",
+        ),
         provenance_id=f"analysis:{evidence_id}",
         tissue="blood",
         species_taxon_id=9615,
@@ -72,7 +88,13 @@ def test_positive_correlation_prevents_duplicate_signatures_from_overstating_pre
         evidence("autophagy", Modality.TRANSCRIPTOMICS, -3.0),
         evidence("mtorc1", Modality.TRANSCRIPTOMICS, -3.2),
     )
-    independent = GeneralizedLeastSquaresFusion().fuse(estimates)
+    with pytest.raises(ValueError, match="joint covariance"):
+        GeneralizedLeastSquaresFusion().fuse(estimates)
+    independent = GeneralizedLeastSquaresFusion(
+        EvidenceFusionConfig(
+            missing_covariance_policy=MissingCovariancePolicy.WARN_ASSUME_INDEPENDENT
+        )
+    ).fuse(estimates)
     assert "shared_correlation_group_assumed_independent" in independent.warnings
     covariance = EvidenceCovariance.from_correlation(
         estimates,
@@ -178,6 +200,35 @@ def test_non_psd_and_variance_mismatch_are_rejected() -> None:
     )
     with pytest.raises(ValueError, match="standard errors"):
         GeneralizedLeastSquaresFusion().fuse(estimates, mismatched)
+
+
+def test_covariance_validation_is_invariant_to_marginal_scale() -> None:
+    with pytest.raises(ValidationError, match="symmetric relative"):
+        EvidenceCovariance(
+            evidence_ids=("a", "b"),
+            covariance=((1e-12, 9e-13), (0.0, 1e-12)),
+            source_id="materially-asymmetric-at-small-scale",
+        )
+
+    estimates = (
+        evidence("a", Modality.CLINICAL, 0.0, 1.0),
+        evidence("b", Modality.METHYLATION, 0.0, 1e-12),
+    )
+    impossible_correlation = EvidenceCovariance(
+        evidence_ids=("a", "b"),
+        covariance=((1.0, 2e-12), (2e-12, 1e-24)),
+        source_id="standardized-correlation-greater-than-one",
+    )
+    with pytest.raises(ValueError, match="positive semidefinite"):
+        GeneralizedLeastSquaresFusion().fuse(estimates, impossible_correlation)
+
+    wrong_small_variance = EvidenceCovariance(
+        evidence_ids=("a", "b"),
+        covariance=((1.0, 0.0), (0.0, 1e-12)),
+        source_id="scale-dependent-diagonal-mismatch",
+    )
+    with pytest.raises(ValueError, match="standard errors"):
+        GeneralizedLeastSquaresFusion().fuse(estimates, wrong_small_variance)
 
 
 @pytest.mark.parametrize(
@@ -324,9 +375,16 @@ def test_hierarchical_fusion_combines_signatures_before_modalities() -> None:
         ),
         source_id="subject-bootstrap",
     )
-    result = HierarchicalEvidenceFusion(across_modality_model=FusionModel.FIXED_EFFECT).fuse(
-        estimates, covariance
-    )
+    with pytest.raises(ValueError, match="cross-modality covariance"):
+        HierarchicalEvidenceFusion(across_modality_model=FusionModel.FIXED_EFFECT).fuse(
+            estimates, covariance
+        )
+    result = HierarchicalEvidenceFusion(
+        EvidenceFusionConfig(
+            cross_modality_covariance_policy=CrossModalityCovariancePolicy.WARN_IGNORE
+        ),
+        across_modality_model=FusionModel.FIXED_EFFECT,
+    ).fuse(estimates, covariance)
 
     assert set(result.within_modality) == {Modality.TRANSCRIPTOMICS, Modality.CLINICAL}
     assert result.within_modality[Modality.TRANSCRIPTOMICS].estimate == pytest.approx(-3.5)
@@ -337,10 +395,35 @@ def test_hierarchical_fusion_combines_signatures_before_modalities() -> None:
     assert result.warnings == ("cross_modality_covariance_not_propagated_by_hierarchy",)
 
     custom_confidence = HierarchicalEvidenceFusion(
-        EvidenceFusionConfig(confidence_level=0.9),
+        EvidenceFusionConfig(
+            confidence_level=0.9,
+            cross_modality_covariance_policy=CrossModalityCovariancePolicy.WARN_IGNORE,
+        ),
         across_modality_model=FusionModel.FIXED_EFFECT,
     ).fuse(estimates, covariance)
     assert custom_confidence.across_modality.confidence_level == 0.9
+
+
+def test_hierarchy_detects_cross_modality_correlation_at_small_scale() -> None:
+    estimates = (
+        evidence("genomic", Modality.TRANSCRIPTOMICS, 0.0, 1e-6),
+        evidence("clinical", Modality.CLINICAL, 1e-6, 1e-6),
+    )
+    covariance = EvidenceCovariance(
+        evidence_ids=("genomic", "clinical"),
+        covariance=((1e-12, 9e-13), (9e-13, 1e-12)),
+        source_id="small-unit-correlated-estimates",
+    )
+
+    with pytest.raises(ValueError, match="cross-modality covariance"):
+        HierarchicalEvidenceFusion().fuse(estimates, covariance)
+
+    warned = HierarchicalEvidenceFusion(
+        EvidenceFusionConfig(
+            cross_modality_covariance_policy=CrossModalityCovariancePolicy.WARN_IGNORE
+        )
+    ).fuse(estimates, covariance)
+    assert warned.warnings == ("cross_modality_covariance_not_propagated_by_hierarchy",)
 
 
 def test_evidence_models_reject_nonfinite_values_and_duplicate_flags() -> None:
@@ -354,3 +437,62 @@ def test_evidence_models_reject_nonfinite_values_and_duplicate_flags() -> None:
             .model_copy(update={"quality_flags": ("flag", "flag")})
             .model_dump()
         )
+
+
+def test_fusion_requires_hash_bound_eligible_calibration_by_default() -> None:
+    validated = evidence("validated", Modality.CLINICAL, 1.0)
+    missing = validated.model_copy(update={"calibration_reference": None})
+    with pytest.raises(ValueError, match="CalibrationReference"):
+        GeneralizedLeastSquaresFusion().fuse((missing,))
+
+    reference = validated.calibration_reference
+    assert reference is not None
+    internal = validated.model_copy(
+        update={
+            "calibration_reference": reference.model_copy(
+                update={"status": CalibrationValidationStatus.INTERNAL_CROSS_VALIDATED}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="not fusion eligible"):
+        GeneralizedLeastSquaresFusion().fuse((internal,))
+    exploratory = GeneralizedLeastSquaresFusion(
+        EvidenceFusionConfig(require_fusion_eligible_calibration=False)
+    ).fuse((internal,))
+    assert exploratory.estimate == 1.0
+
+
+def test_prespecified_evidence_missingness_is_explicit() -> None:
+    available = evidence("available", Modality.CLINICAL, 1.0)
+    with pytest.raises(ValueError, match="prespecified evidence is missing"):
+        GeneralizedLeastSquaresFusion(
+            EvidenceFusionConfig(expected_evidence_ids=("available", "missing"))
+        ).fuse((available,))
+
+    warned = GeneralizedLeastSquaresFusion(
+        EvidenceFusionConfig(
+            expected_evidence_ids=("available", "missing"),
+            missing_evidence_policy=MissingEvidencePolicy.WARN,
+        )
+    ).fuse((available,))
+    assert "prespecified_evidence_missing" in warned.warnings
+
+
+def test_evidence_and_hierarchical_result_mappings_are_immutable() -> None:
+    estimates = (
+        evidence("rna", Modality.TRANSCRIPTOMICS, -1.0),
+        evidence("clinical", Modality.CLINICAL, -0.5),
+    )
+    result = GeneralizedLeastSquaresFusion().fuse(estimates)
+    with pytest.raises(TypeError):
+        result.evidence_weights["rna"] = 99.0  # type: ignore[index]
+    with pytest.raises(TypeError):
+        result.modality_weights[Modality.CLINICAL] = 99.0  # type: ignore[index]
+    with pytest.raises(TypeError):
+        result.standardized_residuals["rna"] = 99.0  # type: ignore[index]
+    assert result.model_validate(result.model_dump(mode="python")) == result
+
+    hierarchy = HierarchicalEvidenceFusion().fuse(estimates)
+    with pytest.raises(TypeError):
+        hierarchy.within_modality[Modality.CLINICAL] = result  # type: ignore[index]
+    assert hierarchy.model_validate(hierarchy.model_dump(mode="python")) == hierarchy

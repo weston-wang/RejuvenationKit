@@ -8,8 +8,8 @@ authors:
 repository-code: "https://github.com/weston-wang/RejuvenationKit"
 url: "https://github.com/weston-wang/RejuvenationKit"
 license: "Apache-2.0"
-version: "0.3.0a2"
-date-released: "2026-08-13"
+version: "0.4.0a1"
+date-released: "2026-08-21"
 keywords:
   - aging
   - longevity

@@ -24,6 +24,10 @@ calibration pairs, whitens held-out change vectors, and reports subjects exceedi
 5% false-alarm threshold. This demonstrates detection mechanics only: because the cohort is
 observational and untreated, a detection is not evidence of rejuvenation or harm.
 
+The source archive is cached locally but is not currently pinned to a repository-owned digest.
+Retain the downloaded bytes and the generated audit manifest for a content-addressed research run;
+the exact summary counts in the case study are a prior manual reference rather than a CI fixture.
+
 ## Normalized visit timing
 
 The released chemistry table labels visits as `precision_1`, `precision_2`, and so

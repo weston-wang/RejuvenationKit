@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
 
-from rejuvenationkit.detection import ChangeDetectionReport, SubjectChangeDetection
-from rejuvenationkit.sequential import SequentialDetectionReport
+from rejuvenationkit.detection import (
+    ChangeDetectionModel,
+    ChangeDetectionReport,
+    SubjectChangeDetection,
+)
+from rejuvenationkit.sequential import SequentialDetectionModel, SequentialDetectionReport
 
 
 def plot_covariance_structure(
@@ -23,7 +30,7 @@ def plot_covariance_structure(
     """Plot the fitted reference covariance or correlation matrix."""
     covariance = np.asarray(report.model.covariance, dtype=float)
     matrix = _correlation(covariance) if correlation else covariance
-    labels = report.model.feature_names
+    labels = _channel_labels(report.model)
     figure, axis = plt.subplots(figsize=(7, 6), constrained_layout=True)
     limit = 1.0 if correlation else max(float(np.abs(matrix).max()), 1e-12)
     image = axis.imshow(
@@ -55,8 +62,11 @@ def plot_covariance_structure(
 def plot_detection_scores(report: ChangeDetectionReport) -> Figure:
     """Plot ordered Mahalanobis scores against the calibrated threshold."""
     ordered = sorted(report.results, key=lambda item: item.squared_mahalanobis_distance)
-    scores = np.asarray([item.squared_mahalanobis_distance for item in ordered])
-    detected = np.asarray([item.detected for item in ordered])
+    scores = np.asarray(
+        [item.squared_mahalanobis_distance for item in ordered],
+        dtype=np.float64,
+    )
+    detected = np.asarray([item.detected for item in ordered], dtype=np.bool_)
     ranks = np.arange(1, len(ordered) + 1)
     figure, axis = plt.subplots(figsize=(8, 4.5), constrained_layout=True)
     axis.scatter(ranks[~detected], scores[~detected], s=22, alpha=0.7, label="Not detected")
@@ -68,10 +78,17 @@ def plot_detection_scores(report: ChangeDetectionReport) -> Figure:
         label=f"Threshold ({report.model.false_alarm_rate:.1%} FAR)",
     )
     axis.set_xlabel("Held-out subject rank")
-    axis.set_ylabel("Squared Mahalanobis distance")
-    axis.set_title("Multivariate detection statistic")
-    axis.legend()
+    axis.set_ylabel("Squared Mahalanobis distance (dimensionless)")
+    axis.set_title(
+        "Multivariate detection statistic\n"
+        f"{report.baseline_visit_id} → {report.follow_up_visit_id}"
+    )
+    if ordered:
+        axis.legend()
+    else:
+        _annotate_empty(axis, len(report.excluded_subject_ids))
     axis.grid(alpha=0.2)
+    _add_channel_contract(figure, report.model)
     return figure
 
 
@@ -113,12 +130,16 @@ def plot_whitened_innovations(
     )
     axis.axhline(0, linewidth=0.8, alpha=0.4)
     axis.axvline(0, linewidth=0.8, alpha=0.4)
-    axis.set_xlabel(f"Whitened component {components[0] + 1}")
-    axis.set_ylabel(f"Whitened component {components[1] + 1}")
+    axis.set_xlabel(f"Whitened component {components[0] + 1} (dimensionless)")
+    axis.set_ylabel(f"Whitened component {components[1] + 1} (dimensionless)")
     axis.set_title("Whitened longitudinal innovations")
     axis.set_aspect("equal", adjustable="datalim")
-    axis.legend()
+    if report.results:
+        axis.legend()
+    else:
+        _annotate_empty(axis, len(report.excluded_subject_ids))
     axis.grid(alpha=0.2)
+    _add_channel_contract(figure, report.model)
     return figure
 
 
@@ -128,7 +149,7 @@ def plot_subject_decomposition(
 ) -> Figure:
     """Plot raw feature innovations and whitened component energy."""
     result = _subject_result(report, subject_id)
-    labels = report.model.feature_names
+    labels = _channel_labels(report.model)
     raw = np.asarray(result.innovation)
     energy = np.square(np.asarray(result.whitened_innovation))
     figure, (raw_axis, energy_axis) = plt.subplots(
@@ -139,7 +160,7 @@ def plot_subject_decomposition(
     )
     raw_axis.bar(labels, raw)
     raw_axis.axhline(0, linewidth=0.8)
-    raw_axis.set_ylabel("Follow-up change minus reference mean")
+    raw_axis.set_ylabel("Innovation (channel-native units)")
     raw_axis.set_title(f"Subject {subject_id}: channel innovations")
     raw_axis.tick_params(axis="x", rotation=30)
 
@@ -151,7 +172,7 @@ def plot_subject_decomposition(
         linewidth=1.2,
         label="Total-score threshold",
     )
-    energy_axis.set_ylabel("Squared whitened amplitude")
+    energy_axis.set_ylabel("Squared whitened amplitude (dimensionless)")
     energy_axis.set_title(f"Whitened energy; total D²={result.squared_mahalanobis_distance:.2f}")
     energy_axis.legend()
     energy_axis.grid(axis="y", alpha=0.2)
@@ -170,12 +191,22 @@ def save_detection_figures(
     if dpi <= 0:
         raise ValueError("dpi must be positive")
     output_dir.mkdir(parents=True, exist_ok=True)
-    selected_subject = subject_id or _highest_scoring_subject(report).subject_id
+    selected_subject = (
+        subject_id or _highest_scoring_subject(report).subject_id if report.results else None
+    )
+    decomposition = (
+        plot_subject_decomposition(report, selected_subject)
+        if selected_subject is not None
+        else _empty_figure(
+            "Subject decomposition",
+            f"No subjects scored; {len(report.excluded_subject_ids)} excluded",
+        )
+    )
     figures = (
         ("covariance", plot_covariance_structure(report)),
         ("scores", plot_detection_scores(report)),
         ("whitened", plot_whitened_innovations(report)),
-        ("decomposition", plot_subject_decomposition(report, selected_subject)),
+        ("decomposition", decomposition),
     )
     paths: list[Path] = []
     for name, figure in figures:
@@ -189,33 +220,63 @@ def save_detection_figures(
 def plot_sequential_trajectories(report: SequentialDetectionReport) -> Figure:
     """Plot cumulative evidence through time against the calibrated threshold."""
     figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    use_observed_timestamps = bool(report.results) and all(
+        point.from_observed_at is not None and point.to_observed_at is not None
+        for result in report.results
+        for point in result.points
+    )
     for result in report.results:
         color = "tab:red" if result.detected else "tab:blue"
         alpha = 0.8 if result.detected else 0.18
-        axis.plot(
-            range(1, len(result.points) + 1),
-            [point.cumulative_score for point in result.points],
-            color=color,
-            alpha=alpha,
-            linewidth=1.5 if result.detected else 0.8,
-        )
+        if use_observed_timestamps:
+            assert result.points[0].from_observed_at is not None
+            x_values = [
+                result.points[0].from_observed_at,
+                *(cast(datetime, point.to_observed_at) for point in result.points),
+            ]
+            y_values = [0.0, *(point.cumulative_score for point in result.points)]
+            axis.plot(
+                x_values,  # type: ignore[arg-type]
+                y_values,
+                color=color,
+                alpha=alpha,
+                linewidth=1.5 if result.detected else 0.8,
+            )
+        else:
+            axis.plot(
+                range(1, len(result.points) + 1),
+                [point.cumulative_score for point in result.points],
+                color=color,
+                alpha=alpha,
+                linewidth=1.5 if result.detected else 0.8,
+            )
     axis.axhline(
         report.model.maximum_cumulative_score_threshold,
         color="black",
         linestyle="--",
         label=f"Subject-level threshold ({report.model.false_alarm_rate:.1%} FAR)",
     )
-    axis.set_xticks(
-        range(1, len(report.visit_ids)),
-        report.visit_ids[1:],
-        rotation=25,
-        ha="right",
-    )
-    axis.set_xlabel("Evidence accumulated through visit")
-    axis.set_ylabel("Cumulative whitened energy")
+    if use_observed_timestamps:
+        locator = AutoDateLocator()  # type: ignore[no-untyped-call]
+        axis.xaxis.set_major_locator(locator)
+        axis.xaxis.set_major_formatter(ConciseDateFormatter(locator))  # type: ignore[no-untyped-call]
+        axis.set_xlabel("Selected observation timestamp")
+    else:
+        axis.set_xticks(
+            range(1, len(report.visit_ids)),
+            report.visit_ids[1:],
+            rotation=25,
+            ha="right",
+        )
+        axis.set_xlabel("Transition endpoint (scheduled visit identifier)")
+    axis.set_ylabel("Cumulative whitened energy (dimensionless)")
     axis.set_title("Sequential departures from reference aging dynamics")
     axis.grid(alpha=0.2)
-    axis.legend()
+    if report.results:
+        axis.legend()
+    else:
+        _annotate_empty(axis, len(report.excluded_subject_ids))
+    _add_channel_contract(figure, report.model)
     return figure
 
 
@@ -246,10 +307,14 @@ def plot_sequential_classification(report: SequentialDetectionReport) -> Figure:
         linewidth=1.2,
     )
     axis.set_xticks(range(len(groups)), groups)
-    axis.set_ylabel("Peak cumulative score")
+    axis.set_ylabel("Peak cumulative whitened score (dimensionless)")
     axis.set_title("Sequential response classification")
     axis.grid(axis="y", alpha=0.2)
-    axis.legend()
+    if report.results:
+        axis.legend()
+    else:
+        _annotate_empty(axis, len(report.excluded_subject_ids))
+    _add_channel_contract(figure, report.model)
     return figure
 
 
@@ -274,6 +339,11 @@ def plot_sequential_modality_evidence(
         }
     )
     figure, axis = plt.subplots(figsize=(9, 5), constrained_layout=True)
+    if not selected:
+        axis.set_title("Channels driving the strongest sequential departures")
+        _annotate_empty(axis, len(report.excluded_subject_ids))
+        _add_channel_contract(figure, report.model)
+        return figure
     x = np.arange(len(selected))
     width = 0.8 / max(len(modalities), 1)
     for modality_index, modality in enumerate(modalities):
@@ -296,10 +366,11 @@ def plot_sequential_modality_evidence(
             label=modality,
         )
     axis.set_xticks(x, [item.subject_id for item in selected], rotation=45, ha="right")
-    axis.set_ylabel("Within-modality peak evidence")
+    axis.set_ylabel("Within-modality squared Mahalanobis evidence")
     axis.set_title("Channels driving the strongest sequential departures")
     axis.legend()
     axis.grid(axis="y", alpha=0.2)
+    _add_channel_contract(figure, report.model)
     return figure
 
 
@@ -358,3 +429,63 @@ def _highest_scoring_subject(report: ChangeDetectionReport) -> SubjectChangeDete
     if not report.results:
         raise ValueError("detection report has no scored subjects")
     return max(report.results, key=lambda item: item.squared_mahalanobis_distance)
+
+
+def _channel_labels(model: ChangeDetectionModel | SequentialDetectionModel) -> tuple[str, ...]:
+    """Render each exact feature/modality/unit/aggregation contract compactly."""
+    labels: list[str] = []
+    for index, feature in enumerate(model.feature_names):
+        requested_modality = (
+            model.feature_modalities[index] if index < len(model.feature_modalities) else None
+        )
+        modality = (
+            model.resolved_feature_modalities[index].value
+            if index < len(model.resolved_feature_modalities)
+            else requested_modality.value
+            if requested_modality is not None
+            else "unspecified"
+        )
+        details = []
+        if index < len(model.feature_units):
+            details.append(model.feature_units[index])
+        if index < len(model.aggregation_policies):
+            details.append(model.aggregation_policies[index].value)
+        suffix = f" [{'; '.join(details)}]" if details else ""
+        labels.append(f"{modality}:{feature}{suffix}")
+    return tuple(labels)
+
+
+def _annotate_empty(axis: object, excluded_subjects: int) -> None:
+    """Annotate an otherwise valid diagnostic when nobody could be scored."""
+    axis.text(  # type: ignore[attr-defined]
+        0.5,
+        0.5,
+        f"No subjects scored\n{excluded_subjects} excluded",
+        ha="center",
+        va="center",
+        transform=axis.transAxes,  # type: ignore[attr-defined]
+    )
+
+
+def _add_channel_contract(
+    figure: Figure,
+    model: ChangeDetectionModel | SequentialDetectionModel,
+) -> None:
+    """Expose exact channel units and aggregation beneath aggregate diagnostics."""
+    figure.text(
+        0.5,
+        0.005,
+        "Channels: " + " | ".join(_channel_labels(model)),
+        ha="center",
+        va="bottom",
+        fontsize=7,
+        wrap=True,
+    )
+
+
+def _empty_figure(title: str, message: str) -> Figure:
+    figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    axis.set_title(title)
+    axis.text(0.5, 0.5, message, ha="center", va="center", transform=axis.transAxes)
+    axis.set_axis_off()
+    return figure

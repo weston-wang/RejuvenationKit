@@ -19,7 +19,8 @@
 - [x] Add sequential detection across three or more visits with persistence requirements.
 - [x] Add cross-validated calibration and randomized group-level treatment-effect inference.
 - [x] Package Phase 1 into a reproducible one-command study-audit workflow.
-- [x] Validate the audit workflow against public longitudinal canine data.
+- [x] Exercise the audit workflow against public longitudinal canine data and document the boundary
+  between the prior online reference run and bounded adapter fixtures used in CI.
 
 ## Phase 2: aging-fusion
 
@@ -36,17 +37,56 @@
 - [x] Add leakage-aware genomic target calibration with domain and overlap checks.
 - [x] Add a revision-pinned, optional Hugging Face genome-embedding interface.
 - [x] Demonstrate correlated genomic and clinical evidence in a synthetic canine workflow.
-- [x] Validate signature and covariance inference on a prespecified external public benchmark.
+- [x] Exercise signature and covariance inference on a prespecified external public benchmark,
+  with its small-sample and no-ground-truth limits stated explicitly.
 - [x] Add a versioned, ambiguity-reporting cross-species ortholog adapter.
+- [x] Add provider-neutral feature domains, immutable resource snapshots, secret-free query
+  provenance, and separate canonical raw-resource/query/normalized-result hashes.
+- [x] Add archived functional-annotation imports and versioned gene/protein-set contracts.
+- [x] Add directionless overrepresentation analysis with an explicit measured background,
+  term-size audit, and local multiple-testing correction.
+- [x] Add archived interaction-network imports with provider mappings, confidence semantics,
+  evidence channels, seed coverage, thresholding, and truncation audits.
+- [x] Add allele- and assembly-specific variant annotation requests, consequence imports, and
+  strict joins to dosage matrices without pretending to normalize equivalent indels.
+- [x] Add public sequencing study/sample/experiment/run manifests without assuming runs or
+  BioSamples are independent subjects; report subject counts only for verified mappings.
+- [x] Add linear/log protein-abundance matrices and provenance-bound Ensembl/HCOP-like ortholog
+  imports with explicit confidence semantics and translation-loss audits.
+- [x] Validate the external-context boundary with archived GO- and STRING-shaped fixtures.
+- [x] Add a separate, statistically explicit and reference-tested directional ranked-set analysis
+  contract, bounded to association with a fixed pre-ranked universe.
+- [x] Add provider-specific export helpers only where exact upstream release, licensing,
+  pagination, and response-checksum semantics can be preserved.
+- [x] Add chunked/Arrow import paths for full-scale annotation, network, and variant dumps, with
+  resumable bounded-memory ingestion and deterministic manifests.
 
 ## Phase 3: aging-state
 
-- Implement linear-Gaussian filtering and smoothing baseline.
-- Add irregular visit spacing and missing observations.
-- Validate coverage, change detection, and forecast calibration.
+- [x] Define exact, typed observation channels and continuous-time linear-Gaussian state models.
+- [x] Implement irregular-time Kalman filtering, Joseph covariance updates, and RTS smoothing.
+- [x] Support partially observed channel vectors without inventing missing measurements.
+- [x] Preserve coverage, exclusion, covariance, and source-study provenance in typed reports.
+- [x] Add model-conditional future forecasts with uncertainty propagation.
+- [x] Add disjoint held-out one-step forecast calibration and innovation diagnostics.
+- [x] Add empirically calibrated innovation change-point detection.
+- [x] Add explicit Phase 2 evidence-to-observation and Phase 3 state-to-endpoint bridges.
+- [x] Document and exercise the complete state-estimation workflow on deterministic synthetic data.
 
 ## Phase 4: full SDK
 
-- Add combination-therapy estimands and efficient-design helpers.
-- Expand workflow orchestration, assay adapters, reports, and benchmark datasets.
-- Stabilize public APIs and publish versioned documentation.
+- [x] Define one-endpoint-per-independent-subject contracts with exact estimands and artifact hashes.
+- [x] Add explicit raw-study and latent-state endpoint construction with missing-subject audits.
+- [x] Implement prespecified factorial main-effect and interaction estimands for randomized or
+  explicitly observational multi-intervention studies.
+- [x] Add classical and HC3 uncertainty, endpoint-precision policies, covariate adjustment,
+  identifiability diagnostics, and interaction-family multiplicity correction.
+- [x] Add balanced factorial allocation and an approximate two-by-two interaction-design helper.
+- [x] Document and exercise a deterministic synthetic canine combination-therapy workflow.
+- [x] Complete the fail-closed end-to-end Phase 1-to-4 workflow, result manifest, and public exports.
+- [x] Stabilize the integrated public APIs and pass the full local and CI release-validation suite.
+
+## Release step (maintainer approval required)
+
+- [ ] Commit the reviewed diff, push it, publish the versioned documentation, tag the release, and
+  verify the resulting PyPI and archival artifacts.
