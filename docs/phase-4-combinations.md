@@ -178,8 +178,11 @@ measurement precision.
 The multiplicity family contains every fitted term of order two or higher, through
 `maximum_interaction_order`. With two interventions there is one interaction, so adjustment leaves
 its p-value unchanged. With three or more interventions, use Benjamini-Hochberg or Bonferroni for
-the prespecified family, or choose `NONE` explicitly. Main effects are reported as model
-coefficients but are not part of this local interaction family.
+the prespecified family, or choose `NONE` explicitly. Single-intervention coefficients are reported
+but are not part of this local interaction family. Interventions are coded 0/1 and interaction
+columns are products, so a single-intervention coefficient is a **simple effect**: the effect of
+that intervention when every other intervention is absent. It is not a main effect averaged over
+the other factors, and it should not be read as one when an interaction is present.
 
 Multiplicity adjustment does not protect against outcome shopping, trying many transforms, or
 selecting models after seeing the data. Those choices require a broader prespecified analysis plan.

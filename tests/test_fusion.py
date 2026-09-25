@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from math import isclose
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
@@ -11,6 +12,7 @@ from rejuvenationkit.fusion import (
     ModalityCalibration,
     ModalityEstimate,
     PrecisionWeightedFusion,
+    RandomEffectsInterval,
 )
 from rejuvenationkit.schemas import Modality, Observation, Study, Subject
 
@@ -219,3 +221,52 @@ def test_fusion_result_mappings_are_immutable_and_serializable() -> None:
     with pytest.raises(TypeError):
         result.calibration_ids[Modality.CLINICAL] = "forged"  # type: ignore[index]
     assert result.model_validate(result.model_dump(mode="python")) == result
+
+
+def test_random_effects_interval_defaults_to_hartung_knapp() -> None:
+    estimates = (
+        estimate(Modality.METHYLATION, -4.0, 0.5),
+        estimate(Modality.TRANSCRIPTOMICS, 1.0, 0.5),
+        estimate(Modality.PROTEOMICS, -1.0, 0.5),
+    )
+    hartung_knapp = PrecisionWeightedFusion().fuse(estimates)
+    wald = PrecisionWeightedFusion(
+        FusionConfig(random_effects_interval=RandomEffectsInterval.WALD)
+    ).fuse(estimates)
+
+    assert hartung_knapp.interval_method == "hartung_knapp"
+    assert hartung_knapp.interval_degrees_of_freedom == 2
+    assert wald.interval_method == "wald"
+    assert wald.interval_degrees_of_freedom is None
+    assert isclose(hartung_knapp.estimate, wald.estimate)
+    assert hartung_knapp.standard_error >= wald.standard_error
+    half_width = (hartung_knapp.confidence_interval[1] - hartung_knapp.confidence_interval[0]) / 2
+    assert isclose(half_width, 4.302652729911275 * hartung_knapp.standard_error, rel_tol=1e-9)
+
+
+def test_hartung_knapp_interval_covers_with_few_heterogeneous_modalities() -> None:
+    random = np.random.default_rng(5)
+    modalities = (Modality.METHYLATION, Modality.TRANSCRIPTOMICS, Modality.PROTEOMICS)
+    fusion = PrecisionWeightedFusion()
+    covered = 0
+    repetitions = 1_000
+    for _ in range(repetitions):
+        errors = random.uniform(0.2, 0.6, 3)
+        values = random.normal(0.0, 1.0, 3) + random.normal(0.0, errors)
+        result = fusion.fuse(
+            tuple(
+                estimate(modality, float(value), float(error))
+                for modality, value, error in zip(modalities, values, errors, strict=True)
+            )
+        )
+        covered += result.confidence_interval[0] <= 0 <= result.confidence_interval[1]
+    # The DerSimonian-Laird Wald interval covers about 82% in this setting.
+    assert covered / repetitions >= 0.93
+
+
+def test_fixed_effect_and_single_modality_keep_wald_interval() -> None:
+    fixed = PrecisionWeightedFusion(FusionConfig(model=FusionModel.FIXED_EFFECT)).fuse(
+        (estimate(Modality.METHYLATION, -1.0), estimate(Modality.PROTEOMICS, 1.0))
+    )
+    single = PrecisionWeightedFusion().fuse((estimate(Modality.METHYLATION, -1.0),))
+    assert fixed.interval_method == single.interval_method == "wald"

@@ -15,7 +15,14 @@ The reference innovation covariance is shrunk, regularized, and Cholesky-whitene
 evidence after \(n\) observed transitions is the whitened energy of
 \(\sum_t e_t / \sqrt{n}\). The threshold is calibrated from the maximum cumulative score reached
 by each reference subject, so it addresses repeated looks across visits rather than calibrating
-each visit independently.
+each visit independently. Each reference subject's maximum is computed against drift and
+covariance refitted without that subject (`reference_score_method="leave_one_out"`), because
+in-sample scores are biased low and inflate the false-alarm rate for new subjects (about 10%
+at a nominal 5% with 30 reference subjects and four channels).
+
+The \(\sqrt{\Delta t}\) normalization assumes random-walk dynamics. When measurement error
+around a stable trait dominates, a subject with skipped visits spans a longer interval, gets a
+smaller normalized innovation, and so loses sensitivity.
 
 The report includes:
 

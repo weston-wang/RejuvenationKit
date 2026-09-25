@@ -79,6 +79,7 @@ from rejuvenationkit.fusion import (
     ModalityCalibration,
     ModalityEstimate,
     PrecisionWeightedFusion,
+    RandomEffectsInterval,
 )
 from rejuvenationkit.longitudinal import (
     AggregationPolicy,
@@ -269,6 +270,7 @@ __all__ = [
     "QCConfig",
     "QCFinding",
     "QCReport",
+    "RandomEffectsInterval",
     "RandomizedInferenceProvenance",
     "RandomizedTreatmentEffectEvaluator",
     "RejuvenationWorkflowConfig",

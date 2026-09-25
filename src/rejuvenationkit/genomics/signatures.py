@@ -10,9 +10,11 @@ from statistics import NormalDist
 from typing import Any, Self, cast
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scipy import sparse
+from scipy.stats import t as student_t
 
 from rejuvenationkit.evidence import (
     CalibrationReference,
@@ -458,8 +460,8 @@ def estimate_signature_contrast(
     estimate = float(treated.mean() - controls.mean())
     generator = np.random.default_rng(config.random_seed)
     bootstrap = np.empty(config.bootstrap_iterations, dtype=float)
-    treated_values = treated.to_numpy(dtype=float)
-    control_values = controls.to_numpy(dtype=float)
+    treated_values = _variance_corrected(treated.to_numpy(dtype=float))
+    control_values = _variance_corrected(controls.to_numpy(dtype=float))
     for index in range(config.bootstrap_iterations):
         treated_sample = generator.choice(treated_values, size=len(treated_values), replace=True)
         control_sample = generator.choice(control_values, size=len(control_values), replace=True)
@@ -467,8 +469,14 @@ def estimate_signature_contrast(
     standard_error = float(bootstrap.std(ddof=1))
     if standard_error <= 0 or not isfinite(standard_error):
         raise ValueError("bootstrap produced zero or non-finite uncertainty")
-    alpha = (1 - config.confidence_level) / 2
-    interval = tuple(float(value) for value in np.quantile(bootstrap, [alpha, 1 - alpha]))
+    critical = float(
+        _welch_critical_values(
+            treated_values.reshape(1, -1),
+            control_values.reshape(1, -1),
+            config.confidence_level,
+        )[0]
+    )
+    interval = (estimate - critical * standard_error, estimate + critical * standard_error)
     contrast = f"{config.treated_cohort}-minus-{config.control_cohort}"
     config_fingerprint = sha256(config.model_dump_json().encode()).hexdigest()
     excluded = tuple(sorted((*treated_excluded, *control_excluded)))
@@ -493,7 +501,7 @@ def estimate_signature_contrast(
         matched_feature_ids=scores.matched_feature_ids,
         missing_feature_ids=scores.missing_feature_ids,
         feature_coverage=scores.feature_coverage,
-        uncertainty_method=f"subject_cluster_bootstrap:{config.bootstrap_iterations}",
+        uncertainty_method=_uncertainty_method("subject_cluster_bootstrap", config),
         provenance_id=(
             f"{scores.matrix_provenance_id}:{scores.matrix_artifact_hash}:"
             f"{scores.sample_assignment_hash}:{scores.signature_fingerprint}:"
@@ -503,6 +511,54 @@ def estimate_signature_contrast(
         species_taxon_id=scores.species_taxon_id,
         tissue=scores.tissue,
         excluded_subject_ids=excluded,
+    )
+
+
+def _variance_corrected(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Inflate within-group deviations by sqrt(n / (n - 1)) along the last axis.
+
+    A nonparametric bootstrap of a mean has variance ``s^2 (n - 1) / n^2``, which
+    understates the unbiased ``s^2 / n`` by 18% in standard error at n = 3.
+    Resampling the inflated values makes the bootstrap variance match ``s^2 / n``
+    without changing the group mean.
+    """
+    size = values.shape[-1]
+    mean = values.mean(axis=-1, keepdims=True)
+    return np.asarray(mean + sqrt(size / (size - 1)) * (values - mean), dtype=float)
+
+
+def _welch_critical_values(
+    treated: npt.NDArray[np.float64],
+    control: npt.NDArray[np.float64],
+    confidence_level: float,
+) -> npt.NDArray[np.float64]:
+    """Return per-row Student t critical values with Welch-Satterthwaite df.
+
+    Inputs are variance-corrected values, so their population variance equals
+    the original unbiased sample variance.
+    """
+    treated_term = treated.var(axis=-1) / treated.shape[-1]
+    control_term = control.var(axis=-1) / control.shape[-1]
+    numerator = (treated_term + control_term) ** 2
+    denominator = treated_term**2 / (treated.shape[-1] - 1) + control_term**2 / (
+        control.shape[-1] - 1
+    )
+    minimum_df = min(treated.shape[-1], control.shape[-1]) - 1
+    degrees_of_freedom = np.where(
+        denominator > 0,
+        numerator / np.where(denominator > 0, denominator, 1.0),
+        minimum_df,
+    )
+    degrees_of_freedom = np.maximum(degrees_of_freedom, minimum_df)
+    return np.asarray(
+        student_t.ppf(0.5 + confidence_level / 2, df=degrees_of_freedom),
+        dtype=float,
+    )
+
+
+def _uncertainty_method(prefix: str, config: SignatureContrastConfig) -> str:
+    return (
+        f"{prefix}:{config.bootstrap_iterations}:small_sample_variance_corrected:welch_t_interval"
     )
 
 
@@ -565,8 +621,12 @@ def estimate_signature_contrasts(
     if any(item != excluded_by_signature[0] for item in excluded_by_signature):
         raise ValueError("joint signatures must exclude identical longitudinal subjects")
 
-    treated_values = np.vstack([series.to_numpy(dtype=float) for series in treated_by_signature])
-    control_values = np.vstack([series.to_numpy(dtype=float) for series in control_by_signature])
+    treated_values = _variance_corrected(
+        np.vstack([series.to_numpy(dtype=float) for series in treated_by_signature])
+    )
+    control_values = _variance_corrected(
+        np.vstack([series.to_numpy(dtype=float) for series in control_by_signature])
+    )
     point_estimates = treated_values.mean(axis=1) - control_values.mean(axis=1)
     generator = np.random.default_rng(config.random_seed)
     bootstrap = np.empty((config.bootstrap_iterations, len(inputs)), dtype=float)
@@ -584,8 +644,17 @@ def estimate_signature_contrasts(
     standard_errors = np.sqrt(np.diag(covariance_array))
     if not np.isfinite(covariance_array).all() or np.any(standard_errors <= 0):
         raise ValueError("joint bootstrap produced invalid covariance")
-    alpha = (1 - config.confidence_level) / 2
-    intervals = np.quantile(bootstrap, [alpha, 1 - alpha], axis=0)
+    critical_values = _welch_critical_values(
+        treated_values,
+        control_values,
+        config.confidence_level,
+    )
+    intervals = np.vstack(
+        (
+            point_estimates - critical_values * standard_errors,
+            point_estimates + critical_values * standard_errors,
+        )
+    )
     denominator = np.outer(standard_errors, standard_errors)
     correlation = covariance_array / denominator
     np.fill_diagonal(correlation, 1.0)
@@ -619,8 +688,9 @@ def estimate_signature_contrasts(
                 matched_feature_ids=scores.matched_feature_ids,
                 missing_feature_ids=scores.missing_feature_ids,
                 feature_coverage=scores.feature_coverage,
-                uncertainty_method=(
-                    f"joint_subject_cluster_bootstrap:{config.bootstrap_iterations}"
+                uncertainty_method=_uncertainty_method(
+                    "joint_subject_cluster_bootstrap",
+                    config,
                 ),
                 provenance_id=(
                     f"{scores.matrix_provenance_id}:{scores.matrix_artifact_hash}:"

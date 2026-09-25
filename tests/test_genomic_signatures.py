@@ -5,6 +5,7 @@ import numpy.typing as npt
 import pandas as pd
 import pytest
 from pydantic import ValidationError
+from scipy.stats import t as student_t
 
 from rejuvenationkit import EffectDirection, Modality
 from rejuvenationkit.genomics import (
@@ -691,3 +692,31 @@ def test_feature_effect_aggregation_validates_reporting_policy() -> None:
         aggregate_feature_effects(feature_effects(), signature(), minimum_feature_coverage=0)
     with pytest.raises(ValueError, match="confidence_level"):
         aggregate_feature_effects(feature_effects(), signature(), confidence_level=1)
+
+
+def test_small_sample_contrast_uses_unbiased_variance_and_welch_interval() -> None:
+    scores = score_weighted_signature(matrix(), signature())
+    config = SignatureContrastConfig(
+        treated_cohort="treated",
+        control_cohort="control",
+        bootstrap_iterations=20_000,
+        random_seed=3,
+    )
+    result = estimate_signature_contrast(scores, signature(), config)
+    frame = scores.to_frame()
+    treated = frame.loc[frame["cohort"] == "treated", "score"].to_numpy(dtype=float)
+    control = frame.loc[frame["cohort"] == "control", "score"].to_numpy(dtype=float)
+    treated_term = treated.var(ddof=1) / len(treated)
+    control_term = control.var(ddof=1) / len(control)
+    welch_se = float(np.sqrt(treated_term + control_term))
+    welch_df = (treated_term + control_term) ** 2 / (
+        treated_term**2 / (len(treated) - 1) + control_term**2 / (len(control) - 1)
+    )
+
+    # An uncorrected bootstrap of three subjects would be sqrt(2/3) = 0.816 of this.
+    assert result.standard_error == pytest.approx(welch_se, rel=0.03)
+    half_width = (result.confidence_interval[1] - result.confidence_interval[0]) / 2
+    assert half_width == pytest.approx(
+        float(student_t.ppf(0.975, df=welch_df)) * result.standard_error, rel=1e-9
+    )
+    assert result.uncertainty_method.endswith(":welch_t_interval")

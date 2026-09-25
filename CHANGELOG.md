@@ -5,6 +5,28 @@ Keep a Changelog format.
 
 ## [Unreleased]
 
+### Fixed
+
+- `MultivariateChangeDetector` and `SequentialTreatmentResponseDetector` now calibrate their
+  thresholds and tail probabilities on leave-one-out reference scores. In-sample scores are biased
+  low, and they inflated the realized false-alarm rate on new subjects from a nominal 5% to 9–40%
+  at the documented minimum reference sizes. Fitted models record
+  `reference_score_method="leave_one_out"`, so serialized models from earlier versions fail hash
+  validation and must be refit. The change detector now requires at least `feature count + 2`
+  complete reference subjects.
+- Random-effects `PrecisionWeightedFusion` now defaults to modified Hartung–Knapp–Sidik–Jonkman
+  intervals (t with `k - 1` df). DerSimonian–Laird Wald intervals covered 76–88% at a nominal 95%
+  with two to four heterogeneous modalities. `RandomEffectsInterval.WALD` keeps the old behavior,
+  and results record `interval_method` and `interval_degrees_of_freedom`.
+- Signature contrasts correct the small-sample bootstrap variance by `sqrt(n / (n - 1))` and use
+  Welch t intervals instead of percentile intervals. Standard errors in the GSE131754 benchmark
+  rise by a factor of about 1.22.
+
+### Changed
+
+- Documented that Phase 4 single-intervention coefficients are simple effects under 0/1 coding.
+- Tests that need the optional `pysam` dependency now skip when it is not installed.
+
 ## [0.4.0a1] - 2026-08-21
 
 ### Added

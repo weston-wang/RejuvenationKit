@@ -25,9 +25,15 @@ The reported `whitened_innovation` shows each subject in those normalized coordi
 
 ## Calibration
 
-The threshold is an empirical reference-score quantile selected by `false_alarm_rate`. Tail
-probabilities also use the reference scores, with a one-count correction. Covariance shrinkage
-and a small ridge stabilize inversion when channels are correlated.
+The threshold is an empirical reference-score quantile selected by `false_alarm_rate`. Each
+reference subject is scored against a mean and covariance fitted **without** that subject
+(`reference_score_method="leave_one_out"`). In-sample Mahalanobis distances are biased low because
+every subject helped fit the model it is scored against. With 20 reference subjects and four
+channels, an in-sample threshold produced a 17% false-alarm rate on new subjects at a nominal 5%.
+Leave-one-out scores are approximately exchangeable with held-out scores, so the realized rate stays
+at or slightly below nominal. Fitting requires at least `feature count + 2` complete reference
+subjects. Tail probabilities also use these reference scores, with a one-count correction.
+Covariance shrinkage and a small ridge stabilize inversion when channels are correlated.
 
 ```python
 detector = MultivariateChangeDetector(
