@@ -22,7 +22,11 @@ renormalized into a complete score.
 
 For a cross-sectional contrast, `estimate_signature_contrast(...)` permits technical replicates
 only at one timestamp per subject, aggregates them, and bootstraps independent subjects within
-treated and control groups. If a subject has multiple biological timepoints, the analysis fails
+treated and control groups. Before resampling, within-group deviations are inflated by
+\(\sqrt{n/(n-1)}\), so the bootstrap variance matches the unbiased \(s^2/n\). An uncorrected
+bootstrap understates the standard error by 18% at three subjects per group. Intervals are
+estimate ± Student t × SE with Welch–Satterthwaite degrees of freedom. Percentile intervals covered
+only about 80% at a nominal 95% with three subjects per arm. If a subject has multiple biological timepoints, the analysis fails
 closed rather than silently averaging baseline and follow-up.
 
 Longitudinal change requires `SignatureContrastMode.PAIRED_CHANGE`, timezone-aware non-overlapping

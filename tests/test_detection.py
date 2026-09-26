@@ -14,6 +14,8 @@ from rejuvenationkit.detection import (
     ChangeDetectionReport,
     MultivariateChangeDetector,
     SubjectChangeDetection,
+    _leave_one_out_scores,
+    _regularized_covariance,
 )
 from rejuvenationkit.longitudinal import (
     AggregationPolicy,
@@ -477,4 +479,68 @@ def test_detector_fails_closed_when_visit_windows_reuse_source_rows() -> None:
             baseline=overlapping_baseline,
             follow_up=overlapping_follow_up,
             reference_subject_ids=reference_ids,
+        )
+
+
+def test_reference_scores_are_leave_one_out() -> None:
+    study, reference_ids, _ = _study()
+    detector = MultivariateChangeDetector(
+        ChangeDetectionConfig(features=FEATURES, minimum_reference_subjects=20)
+    ).fit(study, baseline=BASELINE, follow_up=FOLLOW_UP, reference_subject_ids=reference_ids)
+    assert detector.model_ is not None
+    model = detector.model_
+    assert model.reference_score_method == "leave_one_out"
+
+    matrix = np.asarray(
+        [
+            [
+                next(
+                    row.value
+                    for row in study.observations
+                    if row.subject_id == subject_id
+                    and row.feature == feature.feature
+                    and row.timestamp == FOLLOW_UP.scheduled_at
+                )
+                for feature in FEATURES
+            ]
+            for subject_id in model.reference_subject_ids
+        ]
+    )
+    expected = []
+    for index in range(len(matrix)):
+        training = np.delete(matrix, index, axis=0)
+        empirical = np.cov(training, rowvar=False, ddof=1)
+        covariance = 0.8 * empirical + 0.2 * np.diag(np.diag(empirical))
+        covariance += np.eye(2) * 1e-9 * max(np.trace(covariance) / 2, 1.0)
+        innovation = matrix[index] - training.mean(axis=0)
+        expected.append(float(innovation @ np.linalg.solve(covariance, innovation)))
+    np.testing.assert_allclose(model.reference_score_distribution, sorted(expected), rtol=1e-10)
+
+
+def test_leave_one_out_threshold_holds_nominal_false_alarm_rate() -> None:
+    random = np.random.default_rng(11)
+    realized = []
+    for _ in range(300):
+        reference = random.standard_normal((20, 4))
+        covariance = _regularized_covariance(reference, shrinkage=0.2, ridge=1e-9)
+        scores = _leave_one_out_scores(reference, shrinkage=0.2, ridge=1e-9)
+        threshold = np.quantile(scores, 0.95, method="higher")
+        held_out = random.standard_normal((200, 4)) - reference.mean(axis=0)
+        held_out_scores = np.einsum("ij,jk,ik->i", held_out, np.linalg.inv(covariance), held_out)
+        realized.append(np.mean(held_out_scores > threshold))
+    # In-sample calibration realizes about 17% here.
+    assert np.mean(realized) < 0.065
+
+
+def test_detector_requires_more_reference_subjects_than_features() -> None:
+    study, reference_ids, _ = _study()
+    detector = MultivariateChangeDetector(
+        ChangeDetectionConfig(features=FEATURES, minimum_reference_subjects=3)
+    )
+    with pytest.raises(ValueError, match="feature count \\+ 2"):
+        detector.fit(
+            study,
+            baseline=BASELINE,
+            follow_up=FOLLOW_UP,
+            reference_subject_ids=reference_ids[:3],
         )

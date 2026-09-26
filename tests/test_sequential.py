@@ -18,6 +18,9 @@ from rejuvenationkit.sequential import (
     SequentialDetectionReport,
     SequentialTreatmentResponseDetector,
     SubjectSequentialDetection,
+    _cumulative_scores,
+    _fit_reference_dynamics,
+    _innovations,
 )
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -387,3 +390,39 @@ def test_sequential_detector_rejects_schedule_drift_and_reference_relabeling() -
     )
     with pytest.raises(ValueError, match="reference input"):
         detector.score(relabeled, visits=VISITS, subject_ids=(candidate_ids[1],))
+
+
+def test_sequential_leave_one_out_threshold_holds_nominal_false_alarm_rate() -> None:
+    random = np.random.default_rng(13)
+    realized = []
+    for _ in range(80):
+
+        def generate(count: int) -> list[list[tuple[NDArray[np.float64], float]]]:
+            return [[(random.standard_normal(4), 1.0) for _ in range(3)] for _ in range(count)]
+
+        reference = generate(30)
+        maxima = []
+        for index in range(len(reference)):
+            rate, covariance = _fit_reference_dynamics(
+                reference[:index] + reference[index + 1 :], shrinkage=0.2, ridge=1e-9
+            )
+            maxima.append(
+                max(
+                    _cumulative_scores(
+                        _innovations(reference[index], rate), np.linalg.cholesky(covariance)
+                    )
+                )
+            )
+        threshold = np.quantile(maxima, 0.95, method="higher")
+        rate, covariance = _fit_reference_dynamics(reference, shrinkage=0.2, ridge=1e-9)
+        cholesky = np.linalg.cholesky(covariance)
+        realized.append(
+            np.mean(
+                [
+                    max(_cumulative_scores(_innovations(sequence, rate), cholesky)) > threshold
+                    for sequence in generate(200)
+                ]
+            )
+        )
+    # In-sample calibration realizes about 10% here.
+    assert np.mean(realized) < 0.075

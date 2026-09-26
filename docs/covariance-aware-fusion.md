@@ -43,6 +43,26 @@ For estimate vector \(y\) and externally estimated covariance \(\Sigma\),
 \left(\mathbf{1}^T\Sigma^{-1}\mathbf{1}\right)^{-1/2}.
 \]
 
+That standard error trusts \(\Sigma\) completely. If the estimates disagree more than
+\(\Sigma\) allows, for example because of calibration bias or unmodeled between-assay
+heterogeneity, the interval would stay narrow anyway. The default
+`dispersion_policy=EvidenceDispersionPolicy.MULTIPLICATIVE` therefore uses the disagreement
+statistic \(Q = r^T\Sigma^{-1}r\), which is \(\chi^2_{k-1}\) when \(\Sigma\) is complete.
+With \(\varphi = Q/(k-1)\), the result reports:
+
+- `standard_error` \(= \operatorname{SE}\sqrt{\max(1,\varphi)}\);
+- an interval half-width of \(\max\left(z,\; t_{k-1}\sqrt{\varphi}\right)\operatorname{SE}\);
+- `dispersion_factor` \(= \max(1,\varphi)\); and
+- an `evidence_overdispersed` warning when \(\varphi > 1\).
+
+The \(t_{k-1}\sqrt{\varphi}\) term is exact when \(\Sigma\) is correct up to scale. Taking
+the maximum with the fixed-effect \(z\) interval stops it from collapsing when a few estimates
+agree by chance. In simulations with correlated evidence, the fixed-effect interval covered 83% at
+nominal 95% once between-evidence heterogeneity equalled about one standard error. The adjusted
+interval covered 97–99%. It is conservative for two or three estimates, because two or three
+numbers carry little information about heterogeneity.
+`EvidenceDispersionPolicy.FIXED` restores the fully trusted-covariance interval.
+
 The covariance artifact must name exactly the supplied evidence IDs. When multiple inputs share a
 `correlation_group`, omitting covariance raises by default; assuming independence requires an
 explicit warning policy. The implementation reorders

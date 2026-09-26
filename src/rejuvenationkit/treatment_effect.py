@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from hashlib import sha256
 from typing import Literal
 
@@ -11,6 +12,7 @@ import pandas as pd
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from rejuvenationkit._small_sample import variance_corrected, welch_critical_values
 from rejuvenationkit.combinations import AssignmentMechanism
 from rejuvenationkit.longitudinal import (
     LongitudinalChannel,
@@ -167,15 +169,17 @@ class RandomizedInferenceProvenance(BaseModel):
     covariance_method: Literal["empirical covariance with diagonal shrinkage and scaled ridge"] = (
         "empirical covariance with diagonal shrinkage and scaled ridge"
     )
-    omnibus_covariance_population: Literal["pooled complete treated and control change vectors"] = (
-        "pooled complete treated and control change vectors"
-    )
+    omnibus_covariance_population: Literal[
+        "pooled within-group covariance recomputed for every permutation"
+    ] = "pooled within-group covariance recomputed for every permutation"
     permutation_method: Literal[
-        "unrestricted subject-label permutation with fixed treated sample size"
-    ] = "unrestricted subject-label permutation with fixed treated sample size"
-    bootstrap_method: Literal["independent within-group nonparametric percentile bootstrap"] = (
-        "independent within-group nonparametric percentile bootstrap"
-    )
+        "subject-label permutation within randomization strata with fixed treated counts"
+    ] = "subject-label permutation within randomization strata with fixed treated counts"
+    bootstrap_method: Literal[
+        "within-group bootstrap with small-sample variance correction and Welch t interval"
+    ] = "within-group bootstrap with small-sample variance correction and Welch t interval"
+    multiplicity_method: Literal["holm across follow-up visits"] = "holm across follow-up visits"
+    randomization_strata: tuple[tuple[str, str], ...] = ()
     fold_assignment_method: Literal[
         "seeded shuffle of sorted group identifiers with round-robin folds"
     ] = "seeded shuffle of sorted group identifiers with round-robin folds"
@@ -191,6 +195,12 @@ class RandomizedInferenceProvenance(BaseModel):
                 raise ValueError(f"{name} subject identifiers must be unique and sorted")
         if set(self.treated_subject_ids).intersection(self.control_subject_ids):
             raise ValueError("treated and control provenance identifiers must be disjoint")
+        if self.randomization_strata:
+            stratified_ids = tuple(subject_id for subject_id, _ in self.randomization_strata)
+            if stratified_ids != tuple(
+                sorted((*self.treated_subject_ids, *self.control_subject_ids))
+            ):
+                raise ValueError("randomization strata must cover every subject once, sorted")
         visit_ids = tuple(item.visit_id for item in self.follow_up_visits)
         if len(visit_ids) != len(set(visit_ids)):
             raise ValueError("randomized-inference follow-up visits must be unique")
@@ -232,6 +242,7 @@ class FeatureTreatmentEffect(BaseModel):
     treated_mean_change: float
     control_mean_change: float
     difference_in_differences: float
+    standard_error: float | None = Field(default=None, gt=0)
     confidence_interval_low: float
     confidence_interval_high: float
 
@@ -260,6 +271,7 @@ class VisitTreatmentEffect(BaseModel):
     control_subjects: int = Field(ge=1)
     omnibus_squared_mahalanobis_distance: float = Field(ge=0)
     permutation_p_value: float = Field(gt=0, le=1)
+    holm_adjusted_permutation_p_value: float | None = Field(default=None, gt=0, le=1)
     effects: tuple[FeatureTreatmentEffect, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -326,6 +338,15 @@ class TreatmentEffectReport(BaseModel):
             raise ValueError("treatment exclusions contain an unknown subject")
         if visit_ids != tuple(item.visit_id for item in provenance.follow_up_visits):
             raise ValueError("treatment-effect visits do not match inference provenance")
+        expected_adjusted = _holm_adjust(
+            tuple(visit.permutation_p_value for visit in self.visit_effects)
+        )
+        if any(
+            visit.holm_adjusted_permutation_p_value is None
+            or not np.isclose(visit.holm_adjusted_permutation_p_value, adjusted, rtol=1e-12)
+            for visit, adjusted in zip(self.visit_effects, expected_adjusted, strict=True)
+        ):
+            raise ValueError("Holm-adjusted permutation p-values do not match raw p-values")
         expected_channels = tuple(
             (item.feature, item.modality) for item in provenance.config.features
         )
@@ -413,6 +434,7 @@ class TreatmentEffectReport(BaseModel):
                     visit.omnibus_squared_mahalanobis_distance
                 ),
                 "permutation_p_value": visit.permutation_p_value,
+                "holm_adjusted_permutation_p_value": visit.holm_adjusted_permutation_p_value,
                 **effect.model_dump(mode="json"),
             }
             for visit in self.visit_effects
@@ -447,8 +469,15 @@ class RandomizedTreatmentEffectEvaluator:
         control_subject_ids: tuple[str, ...],
         treated_label: str = "treated",
         control_label: str = "control",
+        randomization_strata: Mapping[str, str] | None = None,
     ) -> TreatmentEffectReport:
-        """Evaluate prespecified treated and control subjects at every follow-up."""
+        """Evaluate prespecified treated and control subjects at every follow-up.
+
+        ``randomization_strata`` maps every subject to the stratum or block within
+        which treatment was randomized. Permutations then reassign labels only within
+        strata, matching the actual randomization distribution. Omit it only for
+        unrestricted (simple or complete) randomization.
+        """
         if not follow_ups:
             raise ValueError("at least one follow-up visit is required")
         follow_up_ids = [visit.visit_id for visit in follow_ups]
@@ -466,6 +495,9 @@ class RandomizedTreatmentEffectEvaluator:
             raise ValueError("insufficient control subjects for cross-validation")
 
         selected = (*treated_subject_ids, *control_subject_ids)
+        if randomization_strata is not None and set(randomization_strata) != set(selected):
+            raise ValueError("randomization strata must cover exactly the treated and controls")
+        strata = dict(randomization_strata or {})
         _validate_visit_order(study, baseline, follow_ups, selected)
         folds = {
             **_subject_folds(
@@ -529,8 +561,14 @@ class RandomizedTreatmentEffectEvaluator:
                     controls,
                     follow_up_visit_id=follow_up.visit_id,
                     random=random,
+                    strata=strata,
                 )
             )
+        adjusted_p_values = _holm_adjust(tuple(item.permutation_p_value for item in visit_effects))
+        visit_effects = [
+            item.model_copy(update={"holm_adjusted_permutation_p_value": adjusted})
+            for item, adjusted in zip(visit_effects, adjusted_p_values, strict=True)
+        ]
         assert resolved_channels is not None
         inference_provenance = RandomizedInferenceProvenance(
             study_id=study.study_id,
@@ -553,6 +591,7 @@ class RandomizedTreatmentEffectEvaluator:
                 visit_changes=visit_changes,
             ),
             fold_calibrations=tuple(fold_calibrations),
+            randomization_strata=tuple(sorted(strata.items())),
         )
         return TreatmentEffectReport(
             study_id=study.study_id,
@@ -701,42 +740,51 @@ class RandomizedTreatmentEffectEvaluator:
         *,
         follow_up_visit_id: str,
         random: np.random.Generator,
+        strata: Mapping[str, str],
     ) -> VisitTreatmentEffect:
         treated_matrix = np.asarray(list(treated.values()), dtype=np.float64)
         control_matrix = np.asarray(list(controls.values()), dtype=np.float64)
         combined = np.vstack((treated_matrix, control_matrix))
-        _, inverse = _mean_and_inverse_covariance(combined, self.config)
-        observed_difference = treated_matrix.mean(axis=0) - control_matrix.mean(axis=0)
-        statistic = max(
-            float(observed_difference @ inverse @ observed_difference),
-            0.0,
-        )
-        group_size = len(treated_matrix)
+        combined_ids = (*treated, *controls)
+        is_treated = np.zeros(len(combined), dtype=bool)
+        is_treated[: len(treated_matrix)] = True
+        # Permute only within randomization strata; without strata the whole sample is
+        # one stratum and this is an ordinary fixed-size label permutation.
+        stratum_labels = [strata.get(subject_id, "") for subject_id in combined_ids]
+        stratum_indices = [
+            np.flatnonzero(np.asarray(stratum_labels, dtype=object) == label)
+            for label in sorted(set(stratum_labels))
+        ]
+        statistic = _omnibus_statistic(combined, is_treated, self.config)
         exceedances = 0
         for _ in range(self.config.permutations):
-            permutation = random.permutation(len(combined))
-            permuted_treated = combined[permutation[:group_size]]
-            permuted_control = combined[permutation[group_size:]]
-            difference = permuted_treated.mean(axis=0) - permuted_control.mean(axis=0)
-            permuted_statistic = float(difference @ inverse @ difference)
-            exceedances += permuted_statistic >= statistic
+            permuted = is_treated.copy()
+            for indices in stratum_indices:
+                permuted[indices] = random.permutation(is_treated[indices])
+            exceedances += _omnibus_statistic(combined, permuted, self.config) >= statistic
         permutation_p_value = (exceedances + 1) / (self.config.permutations + 1)
 
+        observed_difference = treated_matrix.mean(axis=0) - control_matrix.mean(axis=0)
+        treated_corrected = variance_corrected(treated_matrix.T)
+        control_corrected = variance_corrected(control_matrix.T)
         bootstrap_differences = np.empty(
             (self.config.bootstrap_samples, len(self.config.features)),
             dtype=np.float64,
         )
         for index in range(self.config.bootstrap_samples):
-            treated_sample = treated_matrix[
-                random.integers(0, len(treated_matrix), len(treated_matrix))
+            treated_sample = treated_corrected[
+                :, random.integers(0, len(treated_matrix), len(treated_matrix))
             ]
-            control_sample = control_matrix[
-                random.integers(0, len(control_matrix), len(control_matrix))
+            control_sample = control_corrected[
+                :, random.integers(0, len(control_matrix), len(control_matrix))
             ]
-            bootstrap_differences[index] = treated_sample.mean(axis=0) - control_sample.mean(axis=0)
-        tail = (1 - self.config.confidence_level) / 2
-        lower = np.quantile(bootstrap_differences, tail, axis=0)
-        upper = np.quantile(bootstrap_differences, 1 - tail, axis=0)
+            bootstrap_differences[index] = treated_sample.mean(axis=1) - control_sample.mean(axis=1)
+        standard_errors = bootstrap_differences.std(axis=0, ddof=1)
+        critical_values = welch_critical_values(
+            treated_corrected,
+            control_corrected,
+            self.config.confidence_level,
+        )
         effects = tuple(
             FeatureTreatmentEffect(
                 feature=feature.feature,
@@ -744,8 +792,15 @@ class RandomizedTreatmentEffectEvaluator:
                 treated_mean_change=float(treated_matrix[:, index].mean()),
                 control_mean_change=float(control_matrix[:, index].mean()),
                 difference_in_differences=float(observed_difference[index]),
-                confidence_interval_low=float(lower[index]),
-                confidence_interval_high=float(upper[index]),
+                standard_error=(
+                    float(standard_errors[index]) if standard_errors[index] > 0 else None
+                ),
+                confidence_interval_low=float(
+                    observed_difference[index] - critical_values[index] * standard_errors[index]
+                ),
+                confidence_interval_high=float(
+                    observed_difference[index] + critical_values[index] * standard_errors[index]
+                ),
             )
             for index, feature in enumerate(self.config.features)
         )
@@ -757,6 +812,40 @@ class RandomizedTreatmentEffectEvaluator:
             permutation_p_value=permutation_p_value,
             effects=effects,
         )
+
+
+def _omnibus_statistic(
+    combined: NDArray[np.float64],
+    is_treated: NDArray[np.bool_],
+    config: TreatmentEffectConfig,
+) -> float:
+    """Return the mean difference's squared distance under pooled within-group covariance.
+
+    Pooling across arms without centering each arm would let a real treatment effect
+    inflate the covariance and hide itself, so each arm is centered separately.
+    """
+    treated = combined[is_treated]
+    control = combined[~is_treated]
+    difference = treated.mean(axis=0) - control.mean(axis=0)
+    centered = np.vstack((treated - treated.mean(axis=0), control - control.mean(axis=0)))
+    covariance = np.atleast_2d(centered.T @ centered / (len(combined) - 2))
+    covariance = (1 - config.covariance_shrinkage) * covariance + (
+        config.covariance_shrinkage * np.diag(np.diag(covariance))
+    )
+    scale = max(float(np.trace(covariance)) / covariance.shape[0], 1.0)
+    covariance += np.eye(covariance.shape[0]) * config.covariance_ridge * scale
+    return max(float(difference @ np.linalg.solve(covariance, difference)), 0.0)
+
+
+def _holm_adjust(p_values: tuple[float, ...]) -> tuple[float, ...]:
+    """Return Holm step-down adjusted p-values in input order."""
+    order = sorted(range(len(p_values)), key=lambda index: p_values[index])
+    adjusted = [0.0] * len(p_values)
+    running = 0.0
+    for rank, index in enumerate(order):
+        running = max(running, min(1.0, (len(p_values) - rank) * p_values[index]))
+        adjusted[index] = running
+    return tuple(adjusted)
 
 
 def _validate_subject_groups(

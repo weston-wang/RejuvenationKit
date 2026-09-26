@@ -90,6 +90,7 @@ class SequentialDetectionModel(BaseModel):
     maximum_cumulative_score_threshold: float = Field(ge=0)
     false_alarm_rate: float = Field(gt=0, lt=0.5)
     threshold_quantile_method: Literal["higher"] = _EMPIRICAL_QUANTILE_METHOD
+    reference_score_method: Literal["leave_one_out"] = "leave_one_out"
     study_id: str | None = None
     ordered_visits: tuple[ExpectedVisit, ...] = ()
     resolved_channels: tuple[LongitudinalChannel, ...] = ()
@@ -556,44 +557,39 @@ class SequentialTreatmentResponseDetector:
                 f"{len(trajectories)} < {self.config.minimum_reference_subjects}; "
                 f"excluded={len(excluded)}"
             )
-        total_change = np.zeros(len(self.config.features), dtype=np.float64)
-        total_elapsed = 0.0
-        for trajectory in trajectories.values():
-            for first, second in pairwise(trajectory):
-                elapsed = _elapsed_years(first.effective_timestamp, second.effective_timestamp)
-                total_change += second.as_array() - first.as_array()
-                total_elapsed += elapsed
-        mean_rate = np.asarray(total_change / total_elapsed, dtype=np.float64)
-        innovations: list[NDArray[np.float64]] = []
-        subject_innovations: dict[str, list[NDArray[np.float64]]] = {}
-        for subject_id, trajectory in trajectories.items():
-            sequence: list[NDArray[np.float64]] = []
-            for first, second in pairwise(trajectory):
-                elapsed = _elapsed_years(first.effective_timestamp, second.effective_timestamp)
-                innovation = (
-                    second.as_array() - first.as_array() - mean_rate * elapsed
-                ) / math.sqrt(elapsed)
-                innovations.append(innovation)
-                sequence.append(innovation)
-            subject_innovations[subject_id] = sequence
-        matrix = np.asarray(innovations, dtype=np.float64)
-        covariance = np.atleast_2d(np.cov(matrix, rowvar=False, ddof=1))
-        diagonal = np.diag(np.diag(covariance))
-        shrinkage = self.config.covariance_shrinkage
-        covariance = (1 - shrinkage) * covariance + shrinkage * diagonal
-        scale = max(float(np.trace(covariance)) / covariance.shape[0], 1.0)
-        covariance = np.asarray(
-            covariance + np.eye(covariance.shape[0]) * self.config.covariance_ridge * scale,
-            dtype=np.float64,
+        increments = {
+            subject_id: [
+                (
+                    second.as_array() - first.as_array(),
+                    _elapsed_years(first.effective_timestamp, second.effective_timestamp),
+                )
+                for first, second in pairwise(trajectory)
+            ]
+            for subject_id, trajectory in trajectories.items()
+        }
+        mean_rate, covariance = _fit_reference_dynamics(
+            list(increments.values()),
+            shrinkage=self.config.covariance_shrinkage,
+            ridge=self.config.covariance_ridge,
         )
         cholesky = np.asarray(np.linalg.cholesky(covariance), dtype=np.float64)
-        maximum_scores = np.asarray(
-            [
-                max(_cumulative_scores(sequence, cholesky))
-                for sequence in subject_innovations.values()
-            ],
-            dtype=np.float64,
-        )
+        # Each reference subject's maximum score is computed against dynamics fitted
+        # without that subject. In-sample scores are biased low and would inflate the
+        # false-alarm rate for new subjects.
+        maximum_scores = np.empty(len(increments), dtype=np.float64)
+        ordered_increments = list(increments.values())
+        for index, sequence in enumerate(ordered_increments):
+            held_out_rate, held_out_covariance = _fit_reference_dynamics(
+                ordered_increments[:index] + ordered_increments[index + 1 :],
+                shrinkage=self.config.covariance_shrinkage,
+                ridge=self.config.covariance_ridge,
+            )
+            maximum_scores[index] = max(
+                _cumulative_scores(
+                    _innovations(sequence, held_out_rate),
+                    np.asarray(np.linalg.cholesky(held_out_covariance), dtype=np.float64),
+                )
+            )
         threshold = float(
             np.quantile(
                 maximum_scores,
@@ -623,7 +619,7 @@ class SequentialTreatmentResponseDetector:
             feature_units=tuple(item.unit for item in channels),
             aggregation_policies=tuple(item.aggregation_policy for item in channels),
             reference_subjects=len(trajectories),
-            reference_transitions=len(innovations),
+            reference_transitions=sum(len(sequence) for sequence in ordered_increments),
             mean_change_per_year=tuple(float(value) for value in mean_rate),
             innovation_covariance_per_year=tuple(
                 tuple(float(value) for value in row) for row in covariance
@@ -938,6 +934,37 @@ def _elapsed_years(first: datetime, second: datetime) -> float:
     if years <= 0:
         raise ValueError("sequential visits must be chronological for every subject")
     return years
+
+
+def _innovations(
+    sequence: list[tuple[NDArray[np.float64], float]],
+    mean_rate: NDArray[np.float64],
+) -> list[NDArray[np.float64]]:
+    return [
+        np.asarray((change - mean_rate * elapsed) / math.sqrt(elapsed), dtype=np.float64)
+        for change, elapsed in sequence
+    ]
+
+
+def _fit_reference_dynamics(
+    sequences: list[list[tuple[NDArray[np.float64], float]]],
+    *,
+    shrinkage: float,
+    ridge: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Estimate pooled drift and regularized innovation covariance."""
+    total_change = np.sum([change for sequence in sequences for change, _ in sequence], axis=0)
+    total_elapsed = sum(elapsed for sequence in sequences for _, elapsed in sequence)
+    mean_rate = np.asarray(total_change / total_elapsed, dtype=np.float64)
+    matrix = np.asarray(
+        [item for sequence in sequences for item in _innovations(sequence, mean_rate)],
+        dtype=np.float64,
+    )
+    covariance = np.atleast_2d(np.cov(matrix, rowvar=False, ddof=1))
+    covariance = (1 - shrinkage) * covariance + shrinkage * np.diag(np.diag(covariance))
+    scale = max(float(np.trace(covariance)) / covariance.shape[0], 1.0)
+    covariance = covariance + np.eye(covariance.shape[0]) * ridge * scale
+    return mean_rate, np.asarray(covariance, dtype=np.float64)
 
 
 def _cumulative_scores(

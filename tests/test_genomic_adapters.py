@@ -266,6 +266,7 @@ def test_anndata_duck_typed_adapter_preserves_sparse_storage() -> None:
 
 
 def test_vcf_adapter_reads_biallelic_dosage_and_missing_calls(tmp_path: Path) -> None:
+    pytest.importorskip("pysam")
     path = tmp_path / "small.vcf"
     path.write_text(
         """##fileformat=VCFv4.2
@@ -294,6 +295,7 @@ def test_vcf_adapter_reads_biallelic_dosage_and_missing_calls(tmp_path: Path) ->
 
 
 def test_vcf_adapter_rejects_multiallelic_records(tmp_path: Path) -> None:
+    pytest.importorskip("pysam")
     path = tmp_path / "multi.vcf"
     path.write_text(
         """##fileformat=VCFv4.2
@@ -315,6 +317,7 @@ def test_vcf_adapter_rejects_multiallelic_records(tmp_path: Path) -> None:
 
 
 def test_vcf_adapter_rejects_partially_missing_genotype(tmp_path: Path) -> None:
+    pytest.importorskip("pysam")
     path = tmp_path / "partial.vcf"
     path.write_text(
         """##fileformat=VCFv4.2
@@ -336,6 +339,8 @@ def test_vcf_adapter_rejects_partially_missing_genotype(tmp_path: Path) -> None:
 
 
 def test_bioframe_overlap_adapter_maps_coordinate_features(tmp_path: Path) -> None:
+    pytest.importorskip("pysam")
+    pytest.importorskip("bioframe")
     path = tmp_path / "one.vcf"
     path.write_text(
         """##fileformat=VCFv4.2

@@ -12,7 +12,14 @@ models—not a replacement for those models.
 - **Fixed effect** assumes every modality estimates one shared biological effect and weights each
   estimate by inverse variance.
 - **Random effects** is the default. It uses a DerSimonian–Laird estimate of between-modality
-  variance and widens uncertainty when modalities disagree.
+  variance and widens uncertainty when modalities disagree. With few modalities that variance is
+  poorly estimated, so the default interval is the modified Hartung–Knapp–Sidik–Jonkman interval:
+  the standard error is scaled by \(\max(1, q_{HK})\) and the interval uses a t distribution
+  with \(k-1\) degrees of freedom (`interval_method="hartung_knapp"`). A normal (Wald) interval
+  treats the estimated variance as known and covered only 76–88% at a nominal 95% for two to four
+  heterogeneous modalities. It remains available through
+  `random_effects_interval=RandomEffectsInterval.WALD`. With two modalities the t(1) interval is
+  very wide, which is an honest statement that two estimates cannot measure heterogeneity.
 
 Every input must describe the same target on the same scale. For example, all inputs might estimate
 change in biological age in years. A clock-age change in years cannot be fused directly with a
@@ -117,7 +124,7 @@ The toolkit reports the statistic rather than converting it into a pass/fail jud
   [covariance-aware fusion](covariance-aware-fusion.md) API with an externally estimated covariance
   matrix when dependence is material.
 - DerSimonian–Laird variance is a transparent baseline, not an optimal estimator with only two or
-  three modalities.
+  three modalities. Use the reported interval rather than a normal ±1.96 SE interval.
 - Calibration and fusion must not reuse evaluation outcomes in ways that leak treatment effects.
 - A fused biological-age change is not a clinical endpoint or evidence of improved survival.
 

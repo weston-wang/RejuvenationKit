@@ -11,6 +11,7 @@ from types import MappingProxyType
 from typing import Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from scipy.stats import t as student_t
 
 from rejuvenationkit.schemas import Modality, Study
 
@@ -20,6 +21,13 @@ class FusionModel(StrEnum):
 
     FIXED_EFFECT = "fixed_effect"
     RANDOM_EFFECTS = "random_effects"
+
+
+class RandomEffectsInterval(StrEnum):
+    """Confidence-interval method for random-effects fusion."""
+
+    HARTUNG_KNAPP = "hartung_knapp"
+    WALD = "wald"
 
 
 class MissingModalityPolicy(StrEnum):
@@ -94,6 +102,8 @@ class FusionResult(BaseModel):
     confidence_level: float = Field(gt=0, lt=1)
     confidence_interval: tuple[float, float]
     model: FusionModel
+    interval_method: str = "wald"
+    interval_degrees_of_freedom: int | None = Field(default=None, ge=1)
     between_modality_variance: float = Field(ge=0)
     heterogeneity_i2: float = Field(ge=0, le=1)
     present_modalities: tuple[Modality, ...]
@@ -148,6 +158,7 @@ class FusionConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     model: FusionModel = FusionModel.RANDOM_EFFECTS
+    random_effects_interval: RandomEffectsInterval = RandomEffectsInterval.HARTUNG_KNAPP
     confidence_level: float = Field(default=0.95, gt=0, lt=1)
     expected_modalities: tuple[Modality, ...] = ()
     missing_modality_policy: MissingModalityPolicy = MissingModalityPolicy.ALLOW
@@ -182,7 +193,11 @@ class PrecisionWeightedFusion:
 
     The estimator never imputes an absent modality. Fixed-effect fusion assumes one
     shared effect; random-effects fusion estimates DerSimonian-Laird between-modality
-    variance and widens uncertainty when modalities disagree.
+    variance and widens uncertainty when modalities disagree. With only a few
+    modalities that variance is itself poorly estimated, so random-effects intervals
+    default to the modified Hartung-Knapp-Sidik-Jonkman method: the standard error is
+    scaled by ``max(1, q_HK)`` and the interval uses a t distribution with ``k - 1``
+    degrees of freedom.
     """
 
     def __init__(self, config: FusionConfig | None = None) -> None:
@@ -224,10 +239,31 @@ class PrecisionWeightedFusion:
             raise ValueError(f"missing expected modalities: {names}")
 
         estimate, standard_error, weights, q, tau_squared, i2 = self._combine(calibrated)
-        z_value = NormalDist().inv_cdf(0.5 + self.config.confidence_level / 2)
+        interval_method = "wald"
+        degrees_of_freedom: int | None = None
+        critical = NormalDist().inv_cdf(0.5 + self.config.confidence_level / 2)
+        if (
+            self.config.model is FusionModel.RANDOM_EFFECTS
+            and self.config.random_effects_interval is RandomEffectsInterval.HARTUNG_KNAPP
+            and len(calibrated) > 1
+        ):
+            degrees_of_freedom = len(calibrated) - 1
+            precisions = [1.0 / (item.standard_error**2 + tau_squared) for item in calibrated]
+            scale = (
+                sum(
+                    precision * (item.estimate - estimate) ** 2
+                    for precision, item in zip(precisions, calibrated, strict=True)
+                )
+                / degrees_of_freedom
+            )
+            standard_error *= sqrt(max(1.0, scale))
+            critical = float(
+                student_t.ppf(0.5 + self.config.confidence_level / 2, df=degrees_of_freedom)
+            )
+            interval_method = RandomEffectsInterval.HARTUNG_KNAPP.value
         interval = (
-            estimate - z_value * standard_error,
-            estimate + z_value * standard_error,
+            estimate - critical * standard_error,
+            estimate + critical * standard_error,
         )
         sensitivity = tuple(
             self._leave_one_out(item.modality, calibrated, estimate)
@@ -243,6 +279,8 @@ class PrecisionWeightedFusion:
             confidence_level=self.config.confidence_level,
             confidence_interval=interval,
             model=self.config.model,
+            interval_method=interval_method,
+            interval_degrees_of_freedom=degrees_of_freedom,
             between_modality_variance=tau_squared,
             heterogeneity_i2=i2,
             present_modalities=tuple(sorted(present, key=lambda item: item.value)),

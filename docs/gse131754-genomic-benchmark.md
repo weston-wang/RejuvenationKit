@@ -41,12 +41,16 @@ of one scalar, so the example deliberately does not collapse them into an effica
 
 | Age/sex | Design | mTORC1/lipogenesis | Autophagy/lysosome | NRF2 | Inflammatory response | Max. \|correlation\| |
 |---|---|---:|---:|---:|---:|---:|
-| 6 months, female | 42 ppm, 2 months | +0.589 ± 0.268 | −0.057 ± 0.031 | −0.112 ± 0.071 | +0.309 ± 0.055 | 0.62 |
-| 6 months, male | 42 ppm, 2 months | +0.645 ± 0.332 | −0.021 ± 0.019 | −0.097 ± 0.122 | +0.121 ± 0.140 | 0.51 |
-| 12 months, female | 14 ppm, 8 months | −0.547 ± 0.358 | +0.087 ± 0.061 | +0.262 ± 0.123 | −0.244 ± 0.116 | 0.52 |
-| 12 months, male | 14 ppm, 8 months | −0.569 ± 0.266 | +0.109 ± 0.041 | −0.010 ± 0.136 | −0.124 ± 0.086 | 0.55 |
+| 6 months, female | 42 ppm, 2 months | +0.589 ± 0.328 | −0.057 ± 0.038 | −0.112 ± 0.087 | +0.309 ± 0.068 | 0.62 |
+| 6 months, male | 42 ppm, 2 months | +0.645 ± 0.406 | −0.021 ± 0.023 | −0.097 ± 0.150 | +0.121 ± 0.172 | 0.51 |
+| 12 months, female | 14 ppm, 8 months | −0.547 ± 0.438 | +0.087 ± 0.074 | +0.262 ± 0.151 | −0.244 ± 0.142 | 0.52 |
+| 12 months, male | 14 ppm, 8 months | −0.569 ± 0.326 | +0.109 ± 0.050 | −0.010 ± 0.167 | −0.124 ± 0.105 | 0.55 |
 
 Values are treated-minus-control mean signed log2 CPM ± bootstrap SE, not years of biological age.
+The bootstrap resamples variance-corrected deviations, so each SE matches the unbiased
+\(\sqrt{s_t^2/3 + s_c^2/3}\). An uncorrected bootstrap of three animals understated every SE by a
+factor of \(\sqrt{2/3}\); earlier versions of this table reported those smaller values. With four
+degrees of freedom or fewer, the 95% Welch t interval is roughly ±2.8 SE or wider, not ±1.96 SE.
 Every estimate retains its age, sex, dose, duration, and pathway-specific estimand. The covariance
 shows why the panels cannot be treated as four independent confirmations.
 

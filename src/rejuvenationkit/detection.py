@@ -83,6 +83,7 @@ class ChangeDetectionModel(BaseModel):
     threshold: float = Field(ge=0)
     false_alarm_rate: float = Field(gt=0, lt=0.5)
     threshold_quantile_method: Literal["higher"] = _EMPIRICAL_QUANTILE_METHOD
+    reference_score_method: Literal["leave_one_out"] = "leave_one_out"
     study_id: str | None = None
     baseline_visit: ExpectedVisit | None = None
     follow_up_visit: ExpectedVisit | None = None
@@ -397,23 +398,27 @@ class MultivariateChangeDetector:
                 f"{len(changes)} < {self.config.minimum_reference_subjects}"
             )
         matrix = np.asarray(list(changes.values()), dtype=float)
+        dimension = matrix.shape[1]
+        if len(matrix) < dimension + 2:
+            raise ValueError(
+                "leave-one-out calibration requires at least feature count + 2 complete "
+                f"reference subjects: {len(matrix)} < {dimension + 2}"
+            )
         mean = matrix.mean(axis=0)
-        centered = matrix - mean
-        empirical = np.atleast_2d(np.cov(centered, rowvar=False, ddof=1))
-        diagonal = np.diag(np.diag(empirical))
-        shrinkage = self.config.covariance_shrinkage
-        covariance = (1 - shrinkage) * empirical + shrinkage * diagonal
-        scale = max(float(np.trace(covariance)) / covariance.shape[0], 1.0)
-        covariance = covariance + np.eye(covariance.shape[0]) * (
-            self.config.covariance_ridge * scale
+        covariance = _regularized_covariance(
+            matrix,
+            shrinkage=self.config.covariance_shrinkage,
+            ridge=self.config.covariance_ridge,
         )
-        if not np.isfinite(covariance).all():
-            raise ValueError("reference covariance contains non-finite values")
         cholesky = np.asarray(np.linalg.cholesky(covariance), dtype=np.float64)
         inverse = np.asarray(np.linalg.inv(covariance), dtype=np.float64)
-        scores = np.asarray(
-            np.einsum("ij,jk,ik->i", centered, inverse, centered),
-            dtype=np.float64,
+        # In-sample distances are biased low because each subject helped fit the mean
+        # and covariance, so the threshold is calibrated on leave-one-out scores that
+        # are exchangeable with scores of new, held-out subjects.
+        scores = _leave_one_out_scores(
+            matrix,
+            shrinkage=self.config.covariance_shrinkage,
+            ridge=self.config.covariance_ridge,
         )
         threshold = float(np.quantile(scores, 1 - self.config.false_alarm_rate, method="higher"))
         self._inverse_covariance = inverse
@@ -580,6 +585,38 @@ class MultivariateChangeDetector:
         )
         if observed_hash != self.model_.reference_input_artifact_hash:
             raise ValueError("fitted detection reference input is unavailable or altered")
+
+
+def _regularized_covariance(
+    matrix: NDArray[np.float64],
+    *,
+    shrinkage: float,
+    ridge: float,
+) -> NDArray[np.float64]:
+    """Return the diagonal-shrunk, ridge-stabilized sample covariance of rows."""
+    empirical = np.atleast_2d(np.cov(matrix, rowvar=False, ddof=1))
+    covariance = (1 - shrinkage) * empirical + shrinkage * np.diag(np.diag(empirical))
+    scale = max(float(np.trace(covariance)) / covariance.shape[0], 1.0)
+    covariance = covariance + np.eye(covariance.shape[0]) * (ridge * scale)
+    if not np.isfinite(covariance).all():
+        raise ValueError("reference covariance contains non-finite values")
+    return np.asarray(covariance, dtype=np.float64)
+
+
+def _leave_one_out_scores(
+    matrix: NDArray[np.float64],
+    *,
+    shrinkage: float,
+    ridge: float,
+) -> NDArray[np.float64]:
+    """Score each row against a mean and covariance fitted without that row."""
+    scores = np.empty(len(matrix), dtype=np.float64)
+    for index in range(len(matrix)):
+        training = np.delete(matrix, index, axis=0)
+        covariance = _regularized_covariance(training, shrinkage=shrinkage, ridge=ridge)
+        innovation = matrix[index] - training.mean(axis=0)
+        scores[index] = max(float(innovation @ np.linalg.solve(covariance, innovation)), 0.0)
+    return scores
 
 
 def _paired_changes(
