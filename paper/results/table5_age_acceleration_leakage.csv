@@ -1,0 +1,4 @@
+design,true_effect,all_sample_regression,reference_only
+randomized difference-in-differences,-2.0,-1.9961902213702714,-1.9966941493448094
+single-arm pre-post,-2.0,-1.2423503523712789,-2.018936507095922
+"cross-sectional, treated 4 y older",-2.0,-1.0041840893441931,-2.0686977823733765

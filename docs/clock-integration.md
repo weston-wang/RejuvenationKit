@@ -81,9 +81,9 @@ was 1.5 years, and there were 300 replicates.
 
 | Design | All-sample regression | Reference-only (this module) |
 |---|---:|---:|
-| Randomized, both arms measured at baseline and follow-up, difference-in-differences | −2.03 | −2.03 |
-| Single-arm pre-post, reference = baselines | −1.25 (38% understated) | −2.00 |
-| Cross-sectional, treated 4 years older than controls | −1.00 (50% understated) | −2.03 |
+| Randomized, both arms measured at baseline and follow-up, difference-in-differences | −2.00 | −2.00 |
+| Single-arm pre-post, reference = baselines | −1.24 (38% understated) | −2.02 |
+| Cross-sectional, treated 4 years older than controls | −1.00 (50% understated) | −2.07 |
 
 In the balanced randomized design, differencing cancels the slope, so the choice does not matter.
 The designs common in early human and companion-animal rejuvenation studies are single-arm

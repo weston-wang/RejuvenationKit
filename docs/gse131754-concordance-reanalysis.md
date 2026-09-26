@@ -57,9 +57,10 @@ pair.
    no noise model.
 
 The corrected covariance is tested with a within-stratum label permutation, and p-values are
-Holm-adjusted over all 28 pairs. In simulation the corrected estimate recovered the true effect
-correlation (0.01, 0.61 and −0.39 for truths of 0, 0.6 and −0.4). The naive correlation for the
-same data was 0.24, 0.56 and 0.04. The permutation test held 5% size under the complete null.
+Holm-adjusted over all 28 pairs. In simulation (`paper/reproduce.py`, Table 4) the corrected
+estimate recovered the true effect correlation: −0.01, 0.60 and −0.40 for truths of 0, 0.6 and
+−0.4. The naive correlation for the same data was 0.24, 0.55 and 0.03. The permutation test held
+its size under the complete null (6% at nominal 5% over 100 replicates).
 
 ## Results
 
