@@ -19,6 +19,7 @@ nav:
   - Phase 2 architecture and use cases: phase-2-architecture-and-use-cases.md
   - Genome-scale data model: genomic-data-model.md
   - Genomic signatures: genomic-signatures.md
+  - Using biolearn and pyaging clocks: clock-integration.md
   - Cross-species genomics: cross-species-genomics.md
   - External biology resources: external-biology-resources.md
   - Hugging Face genomics: huggingface-genomics.md

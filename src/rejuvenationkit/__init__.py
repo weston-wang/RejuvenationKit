@@ -17,6 +17,14 @@ from rejuvenationkit.bridges import (
     state_report_to_endpoints,
     study_feature_endpoints,
 )
+from rejuvenationkit.clocks import (
+    AgeAcceleration,
+    ClockFit,
+    age_acceleration,
+    clock_observations,
+    clock_table_from_biolearn,
+    clock_table_from_pyaging,
+)
 from rejuvenationkit.combinations import (
     AssignmentMechanism,
     CombinationAnalysisReport,
@@ -192,6 +200,7 @@ from rejuvenationkit.workflow import (
 )
 
 __all__ = [
+    "AgeAcceleration",
     "AggregationPolicy",
     "ArtifactIdentity",
     "AssignmentMechanism",
@@ -203,6 +212,7 @@ __all__ = [
     "ChangeDetectionConfig",
     "ChangeDetectionModel",
     "ChangeDetectionReport",
+    "ClockFit",
     "CombinationAnalysisReport",
     "CombinationDesignDiagnostic",
     "CovarianceEstimator",
@@ -339,7 +349,11 @@ __all__ = [
     "WorkflowManifestArtifact",
     "WorkflowPhase",
     "WorkflowQCGate",
+    "age_acceleration",
     "balanced_factorial_allocation",
+    "clock_observations",
+    "clock_table_from_biolearn",
+    "clock_table_from_pyaging",
     "complete_visit_vectors",
     "extract_visit_aligned_values",
     "fit_trial_level",
