@@ -21,6 +21,24 @@ Keep a Changelog format.
 - Signature contrasts correct the small-sample bootstrap variance by `sqrt(n / (n - 1))` and use
   Welch t intervals instead of percentile intervals. Standard errors in the GSE131754 benchmark
   rise by a factor of about 1.22.
+- `RandomizedTreatmentEffectEvaluator` feature intervals use the same variance-corrected bootstrap
+  SE with Welch t intervals. Percentile intervals covered 90% at nominal 95% with 8 subjects per
+  arm. Each effect now reports `standard_error`.
+  Provenance records the new permutation, bootstrap, and multiplicity methods. Treatment-effect
+  reports serialized by earlier versions therefore fail validation and must be regenerated.
+- The treatment-effect omnibus statistic uses an arm-centered pooled within-group covariance,
+  recomputed for every permutation, so a real effect no longer inflates its own covariance.
+- `GeneralizedLeastSquaresFusion` now widens its interval when evidence disagrees beyond the
+  supplied covariance (`EvidenceDispersionPolicy.MULTIPLICATIVE`, default). The half-width is
+  `max(z, t_{k-1} sqrt(Q/(k-1))) x SE`, and the reported SE is scaled by `sqrt(max(1, Q/(k-1)))`.
+  `EvidenceDispersionPolicy.FIXED` keeps the previous behavior.
+
+### Added
+
+- `randomization_strata` in `RandomizedTreatmentEffectEvaluator.evaluate()` permutes labels within
+  strata or blocks and records them in provenance.
+- Holm-adjusted permutation p-values across follow-up visits
+  (`holm_adjusted_permutation_p_value`).
 
 ### Changed
 

@@ -14,6 +14,7 @@ import numpy as np
 import numpy.typing as npt
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from scipy.optimize import Bounds, LinearConstraint, minimize
+from scipy.stats import t as student_t
 
 from rejuvenationkit.fusion import (
     FusionConfig,
@@ -38,6 +39,13 @@ class EvidenceWeightConstraint(StrEnum):
 
     UNCONSTRAINED = "unconstrained"
     NONNEGATIVE = "nonnegative"
+
+
+class EvidenceDispersionPolicy(StrEnum):
+    """How GLS uncertainty responds to disagreement beyond the supplied covariance."""
+
+    MULTIPLICATIVE = "multiplicative"
+    FIXED = "fixed"
 
 
 class CalibrationValidationStatus(StrEnum):
@@ -261,6 +269,7 @@ class EvidenceFusionConfig(BaseModel):
     variance_relative_tolerance: float = Field(default=1e-6, ge=0)
     report_negative_weights: bool = True
     weight_constraint: EvidenceWeightConstraint = EvidenceWeightConstraint.UNCONSTRAINED
+    dispersion_policy: EvidenceDispersionPolicy = EvidenceDispersionPolicy.MULTIPLICATIVE
     allow_mixed_species: bool = False
     allow_mixed_subjects: bool = False
     require_fusion_eligible_calibration: bool = True
@@ -293,6 +302,9 @@ class EvidenceFusionResult(BaseModel):
     modality_weights: Mapping[Modality, float]
     standardized_residuals: Mapping[str, float]
     disagreement_score: float = Field(ge=0)
+    dispersion_factor: float = Field(default=1.0, ge=1)
+    interval_method: str = "wald"
+    interval_degrees_of_freedom: int | None = Field(default=None, ge=1)
     effective_evidence_count: float = Field(gt=0)
     condition_number: float = Field(ge=1)
     regularization_applied: float = Field(ge=0)
@@ -404,10 +416,33 @@ class GeneralizedLeastSquaresFusion:
         self._validate_estimates(estimates)
         matrix, source_id = self._aligned_covariance(estimates, covariance)
         values = self._solve(estimates, matrix)
-        z_value = NormalDist().inv_cdf(0.5 + self.config.confidence_level / 2)
+        standard_error = values.standard_error
+        dispersion_factor = 1.0
+        interval_method = "wald"
+        degrees_of_freedom: int | None = None
+        critical = NormalDist().inv_cdf(0.5 + self.config.confidence_level / 2)
+        if (
+            self.config.dispersion_policy is EvidenceDispersionPolicy.MULTIPLICATIVE
+            and len(estimates) > 1
+        ):
+            # With a complete covariance, the disagreement statistic Q is chi-square with
+            # k - 1 df, so estimate +/- t(k-1) * SE * sqrt(Q / (k - 1)) is exact when the
+            # covariance is correct only up to scale. That interval can collapse when the
+            # estimates agree by chance, so it is never allowed to be narrower than the
+            # fixed-effect interval that trusts the supplied covariance.
+            degrees_of_freedom = len(estimates) - 1
+            scale = values.disagreement / degrees_of_freedom
+            dispersion_factor = max(1.0, scale)
+            t_critical = float(
+                student_t.ppf(0.5 + self.config.confidence_level / 2, df=degrees_of_freedom)
+            )
+            half_width = max(critical, t_critical * sqrt(scale)) * standard_error
+            standard_error *= sqrt(dispersion_factor)
+            critical = half_width / standard_error
+            interval_method = "max_fixed_effect_or_multiplicative_t"
         interval = (
-            values.estimate - z_value * values.standard_error,
-            values.estimate + z_value * values.standard_error,
+            values.estimate - critical * standard_error,
+            values.estimate + critical * standard_error,
         )
         evidence_weights = {
             item.evidence_id: weight for item, weight in zip(estimates, values.weights, strict=True)
@@ -425,6 +460,8 @@ class GeneralizedLeastSquaresFusion:
             )
         }
         warnings = self._warnings(estimates, values, covariance_supplied=covariance is not None)
+        if dispersion_factor > 1:
+            warnings = (*warnings, "evidence_overdispersed")
         missing_expected = sorted(
             set(self.config.expected_evidence_ids).difference(
                 item.evidence_id for item in estimates
@@ -435,13 +472,16 @@ class GeneralizedLeastSquaresFusion:
         return EvidenceFusionResult(
             estimand=estimates[0].estimand,
             estimate=values.estimate,
-            standard_error=values.standard_error,
+            standard_error=standard_error,
             confidence_level=self.config.confidence_level,
             confidence_interval=interval,
             evidence_weights=evidence_weights,
             modality_weights=dict(modality_weights),
             standardized_residuals=standardized,
             disagreement_score=values.disagreement,
+            dispersion_factor=dispersion_factor,
+            interval_method=interval_method,
+            interval_degrees_of_freedom=degrees_of_freedom,
             effective_evidence_count=1.0 / sum(weight**2 for weight in values.weights),
             condition_number=values.condition_number,
             regularization_applied=values.ridge,

@@ -11,6 +11,7 @@ from rejuvenationkit import (
     EffectDirection,
     Estimand,
     EvidenceCovariance,
+    EvidenceDispersionPolicy,
     EvidenceEstimate,
     EvidenceFusionConfig,
     EvidenceWeightConstraint,
@@ -496,3 +497,40 @@ def test_evidence_and_hierarchical_result_mappings_are_immutable() -> None:
     with pytest.raises(TypeError):
         hierarchy.within_modality[Modality.CLINICAL] = result  # type: ignore[index]
     assert hierarchy.model_validate(hierarchy.model_dump(mode="python")) == hierarchy
+
+
+def test_disagreeing_evidence_widens_gls_interval() -> None:
+    estimates = (
+        evidence("clinical", Modality.CLINICAL, -4.0, 0.5),
+        evidence("methylation", Modality.METHYLATION, 1.0, 0.5),
+        evidence("proteomics", Modality.PROTEOMICS, -1.0, 0.5),
+    )
+    adjusted = GeneralizedLeastSquaresFusion().fuse(estimates)
+    fixed = GeneralizedLeastSquaresFusion(
+        EvidenceFusionConfig(dispersion_policy=EvidenceDispersionPolicy.FIXED)
+    ).fuse(estimates)
+
+    phi = adjusted.disagreement_score / 2
+    assert phi > 1
+    assert adjusted.dispersion_factor == pytest.approx(phi)
+    assert adjusted.standard_error == pytest.approx(fixed.standard_error * phi**0.5)
+    assert adjusted.interval_degrees_of_freedom == 2
+    assert "evidence_overdispersed" in adjusted.warnings
+    half_width = (adjusted.confidence_interval[1] - adjusted.confidence_interval[0]) / 2
+    assert half_width == pytest.approx(4.302652729911275 * fixed.standard_error * phi**0.5)
+    assert fixed.interval_method == "wald"
+    assert fixed.dispersion_factor == 1.0
+
+
+def test_agreeing_evidence_never_narrows_below_fixed_effect_interval() -> None:
+    estimates = (
+        evidence("clinical", Modality.CLINICAL, -1.0, 0.5),
+        evidence("methylation", Modality.METHYLATION, -1.0, 0.5),
+    )
+    adjusted = GeneralizedLeastSquaresFusion().fuse(estimates)
+    fixed = GeneralizedLeastSquaresFusion(
+        EvidenceFusionConfig(dispersion_policy=EvidenceDispersionPolicy.FIXED)
+    ).fuse(estimates)
+    assert adjusted.disagreement_score == pytest.approx(0.0)
+    assert adjusted.confidence_interval == pytest.approx(fixed.confidence_interval)
+    assert adjusted.standard_error == pytest.approx(fixed.standard_error)
