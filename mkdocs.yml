@@ -22,6 +22,7 @@ nav:
   - External biology resources: external-biology-resources.md
   - Hugging Face genomics: huggingface-genomics.md
   - Public genomic benchmark: gse131754-genomic-benchmark.md
+  - Shared-control concordance reanalysis: gse131754-concordance-reanalysis.md
   - Phase 3 state estimation: phase-3-state.md
   - Phase 4 combination analysis: phase-4-combinations.md
   - Four-phase workflow: four-phase-workflow.md

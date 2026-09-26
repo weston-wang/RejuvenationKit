@@ -140,6 +140,64 @@ def select_rapamycin_and_controls(
     return counts.loc[:, selected].copy()
 
 
+INTERVENTION_CONTROLS: dict[str, str] = {
+    "ACA": "CON",
+    "CR": "CON",
+    "EST": "CON",
+    "PROT": "CON",
+    "RAP": "CON",
+    "GHRKO": "GHRCON",
+    "SNELL": "SNELLCON",
+    "MR": "MRCON",
+}
+"""Each GSE131754 intervention code mapped to its matched control group.
+
+ACA (acarbose), CR (caloric restriction), EST (17-alpha-estradiol), PROT
+(Protandim), and RAP (rapamycin) share the ``CON`` animals in each age/sex
+stratum. The three genetic or dietary models have their own controls.
+"""
+
+
+def filtered_log2_cpm(
+    counts: pd.DataFrame,
+    *,
+    minimum_cpm: float = 1.0,
+    minimum_sample_fraction: float = 0.5,
+) -> pd.DataFrame:
+    """Return log2(CPM + 1) for genes expressed in enough samples.
+
+    A gene is kept when its CPM exceeds ``minimum_cpm`` in at least
+    ``minimum_sample_fraction`` of samples. Filtering uses only expression
+    levels, never group labels, so it cannot select genes by treatment effect.
+    """
+    if not 0 < minimum_sample_fraction <= 1:
+        raise ValueError("minimum_sample_fraction must lie in (0, 1]")
+    library_sizes = counts.sum(axis=0)
+    if (library_sizes <= 0).any():
+        raise ValueError("every sample must have a positive library size")
+    cpm = counts.divide(library_sizes, axis=1) * 1_000_000
+    keep = (cpm > minimum_cpm).mean(axis=1) >= minimum_sample_fraction
+    if not keep.any():
+        raise ValueError("no genes pass the expression filter")
+    return cast(pd.DataFrame, np.log2(cpm.loc[keep] + 1))
+
+
+def intervention_sample_table(counts: pd.DataFrame) -> pd.DataFrame:
+    """Return a sample table with ``group`` and ``stratum`` columns.
+
+    ``group`` is the intervention or control code and ``stratum`` is age and sex,
+    for example ``"6m-F"``. The index matches the count-matrix columns.
+    """
+    rows = {}
+    for column in counts.columns:
+        metadata = parse_sample_name(str(column))
+        rows[str(column)] = {
+            "group": metadata.intervention_code,
+            "stratum": f"{metadata.age_months}m-{metadata.sex}",
+        }
+    return pd.DataFrame.from_dict(rows, orient="index").loc[[str(item) for item in counts.columns]]
+
+
 def descriptive_log2_fold_changes(counts: pd.DataFrame) -> pd.DataFrame:
     """Estimate equal-weighted RAP-minus-control log2 CPM differences.
 
