@@ -5,6 +5,19 @@ Keep a Changelog format.
 
 ## [Unreleased]
 
+### Added
+
+- `rejuvenationkit.genomics.concordance`: cross-intervention concordance of effect vectors with
+  shared-control noise removed, a disjoint-control cross-check, within-stratum permutation tests
+  and Holm adjustment. GSE131754 helpers (`filtered_log2_cpm`, `intervention_sample_table`,
+  `INTERVENTION_CONTROLS`) and a public reanalysis example.
+- `rejuvenationkit.surrogates`: meta-analytic surrogate-endpoint validation. It includes
+  trial-level R² with parametric-bootstrap intervals, individual-level R², the surrogate
+  threshold effect, leave-one-unit-out prediction checks, and a trial-count precision planner.
+- `rejuvenationkit.clocks`: adapters for biolearn and pyaging clock outputs into typed
+  observations, and leakage-safe age acceleration fitted on reference samples only.
+- `paper/`: a methods-note draft and `reproduce.py`, which regenerates every table.
+
 ### Fixed
 
 - `MultivariateChangeDetector` and `SequentialTreatmentResponseDetector` now calibrate their

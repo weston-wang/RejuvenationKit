@@ -1,0 +1,4 @@
+subjects_per_arm,percentile_bootstrap,corrected_welch_t
+3,0.80875,0.966
+8,0.90975,0.95225
+20,0.93225,0.94825

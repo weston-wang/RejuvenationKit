@@ -11,6 +11,7 @@ nav:
   - DSP visualization: dsp-visualization.md
   - Sequential response detection: sequential-treatment-response.md
   - Randomized treatment effects: randomized-treatment-effects.md
+  - Surrogate-endpoint validation: surrogate-validation.md
   - One-command study audit: study-audit.md
   - DAP audit case study: dap-audit-case-study.md
   - Multimodal fusion: multimodal-fusion.md
@@ -18,10 +19,12 @@ nav:
   - Phase 2 architecture and use cases: phase-2-architecture-and-use-cases.md
   - Genome-scale data model: genomic-data-model.md
   - Genomic signatures: genomic-signatures.md
+  - Using biolearn and pyaging clocks: clock-integration.md
   - Cross-species genomics: cross-species-genomics.md
   - External biology resources: external-biology-resources.md
   - Hugging Face genomics: huggingface-genomics.md
   - Public genomic benchmark: gse131754-genomic-benchmark.md
+  - Shared-control concordance reanalysis: gse131754-concordance-reanalysis.md
   - Phase 3 state estimation: phase-3-state.md
   - Phase 4 combination analysis: phase-4-combinations.md
   - Four-phase workflow: four-phase-workflow.md

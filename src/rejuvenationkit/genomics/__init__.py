@@ -41,6 +41,14 @@ from rejuvenationkit.genomics.chunked import (
     write_chunked_table,
     write_chunked_variants,
 )
+from rejuvenationkit.genomics.concordance import (
+    ConcordanceFamily,
+    InterventionConcordance,
+    InterventionContrast,
+    StrataPolicy,
+    concordance_family,
+    intervention_concordance,
+)
 from rejuvenationkit.genomics.effects import FeatureEffect, FeatureEffectBatch, read_feature_effects
 from rejuvenationkit.genomics.enrichment import (
     FunctionalGeneSet,
@@ -186,6 +194,7 @@ __all__ = [
     "ChunkedPartition",
     "ChunkedStorageFormat",
     "ChunkedTableKind",
+    "ConcordanceFamily",
     "DirectionalRankedSetRequest",
     "DirectionalRankedSetResult",
     "DuplicatePolicy",
@@ -233,6 +242,8 @@ __all__ = [
     "InteractionNetworkColumns",
     "InteractionNode",
     "InteractionSign",
+    "InterventionConcordance",
+    "InterventionContrast",
     "MatrixScale",
     "MissingFeaturePolicy",
     "MultipleTestingAudit",
@@ -274,6 +285,7 @@ __all__ = [
     "SignatureScores",
     "SignatureTimeWindow",
     "StrandPolicy",
+    "StrataPolicy",
     "SubjectMappingBasis",
     "SubjectMappingDeclaration",
     "SubjectMappingStatus",
@@ -297,6 +309,7 @@ __all__ = [
     "build_sra_export",
     "build_string_export",
     "canonical_sha256",
+    "concordance_family",
     "estimate_signature_contrast",
     "estimate_signature_contrasts",
     "from_anndata",
@@ -304,6 +317,7 @@ __all__ = [
     "from_methylation_beta",
     "from_protein_abundance_frame",
     "gene_set_collection_from_frame",
+    "intervention_concordance",
     "iter_chunked_partitions",
     "iter_csv_chunks",
     "iter_parquet_chunks",
